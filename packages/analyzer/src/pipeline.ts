@@ -175,7 +175,11 @@ export class PipelineAnalyzer implements Analyzer {
             return validation.valid ? true : validation.feedback;
           },
         });
-    const outline = buildOutline(stage1.output, manifest, oversized);
+    // StageRunner retains the last parsed output to aid diagnostics even when
+    // deterministic validation rejects it. Never build from that rejected
+    // outline: it may be incomplete and would create a sixth residual chapter.
+    const acceptedStage1 = stage1.accepted ? stage1.output : undefined;
+    const outline = buildOutline(acceptedStage1, manifest, acceptedStage1 === undefined);
     await hooks.onSkeleton?.(outline, identity);
     throwIfAborted(context.signal);
 
@@ -306,6 +310,8 @@ function stage1Prompt(title: string, body: string, manifest: ManifestRow[]): str
     requirements: {
       every_file_exactly_once: true,
       pre_binned_noise_must_remain_in_appendix: true,
+      chapter_count: "Use 2 to 5 broad, coherent review chapters. Never exceed 5 chapters.",
+      chapter_granularity: "Group related files into end-to-end concerns; do not create one chapter per component or file.",
       maximum_context_requests: 10,
       skeleton_only: "Do not invent entry points or flow; those are generated later.",
     },

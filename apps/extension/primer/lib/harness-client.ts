@@ -120,7 +120,7 @@ export class HarnessClient {
     const response = await fetch(new URL(path, this.#config.apiBaseUrl), {
       ...init,
       headers: {
-        "Content-Type": "application/json",
+        ...(init.body !== undefined ? { "Content-Type": "application/json" } : {}),
         ...(this.#config.accessToken
           ? { Authorization: `Bearer ${this.#config.accessToken}` }
           : {}),

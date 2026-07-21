@@ -69,6 +69,15 @@ button { color: inherit; }
 .repository-option[data-highlighted] { background: var(--signal-soft); color: #184fbf; }
 .primary-action { width: fit-content; min-height: 42px; display: inline-flex; align-items: center; gap: 18px; padding: 0 15px; border-radius: 8px; background: var(--ink); color: white; font-size: 11px; text-decoration: none; }
 .primary-action:hover { background: var(--signal); }
+.review-start { width: min(100%, 460px); }
+.review-start .launcher-mark { margin-bottom: 34px; }
+.review-start .commit-pill { display: block; width: fit-content; margin: -14px 0 24px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--muted); font: 8px "IBM Plex Mono", monospace; }
+.review-start .start-warning { max-width: 355px; margin: -14px 0 22px; color: var(--risk); font-size: 10px; line-height: 1.5; }
+.review-start .start-error { max-width: 355px; display: flex; align-items: flex-start; gap: 7px; margin: 0 0 18px; padding: 9px 10px; border: 1px solid #e2b3a8; border-radius: 7px; background: #fae9e5; color: #9e402d; font-size: 9px; line-height: 1.4; }
+.review-start .start-button { border: 0; cursor: pointer; }
+.review-start .start-button:disabled { opacity: .55; cursor: default; }
+.spin { animation: primer-spin .8s linear infinite; }
+@keyframes primer-spin { to { transform: rotate(360deg); } }
 
 .conversation { width: 100%; max-width: 680px; min-height: 0; flex: 1 1 auto; align-self: center; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; -webkit-overflow-scrolling: touch; padding: 0 24px 38px; contain: layout paint; }
 .conversation:focus-visible { outline: 2px solid var(--signal); outline-offset: -2px; }

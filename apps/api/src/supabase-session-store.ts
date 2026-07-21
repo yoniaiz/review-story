@@ -65,32 +65,27 @@ export class SupabaseReviewSessionStore implements ReviewSessionStore {
   async save(session: ReviewSession): Promise<void> {
     const updatedAt = new Date().toISOString();
     session.updatedAt = updatedAt;
-    await this.#request(`review_sessions?id=eq.${encodeURIComponent(session.id)}`, {
-      method: "PATCH",
-      headers: { Prefer: "return=minimal" },
-      body: JSON.stringify({
-        status: session.status,
-        current_chapter_id: session.currentChapterId ?? null,
-        artifact: session.artifact ?? null,
-        skeleton: session.skeleton ?? null,
-        error: session.error ?? null,
-        updated_at: updatedAt,
+    await Promise.all([
+      this.#request(`review_sessions?id=eq.${encodeURIComponent(session.id)}`, {
+        method: "PATCH",
+        headers: { Prefer: "return=minimal" },
+        body: JSON.stringify({
+          status: session.status,
+          current_chapter_id: session.currentChapterId ?? null,
+          artifact: session.artifact ?? null,
+          skeleton: session.skeleton ?? null,
+          error: session.error ?? null,
+          updated_at: updatedAt,
+        }),
       }),
-    });
-    await Promise.all([
-      this.#request(`chapter_progress?session_id=eq.${encodeURIComponent(session.id)}`, { method: "DELETE" }),
-      this.#request(`chat_turns?session_id=eq.${encodeURIComponent(session.id)}`, { method: "DELETE" }),
-      this.#request(`comment_drafts?session_id=eq.${encodeURIComponent(session.id)}`, { method: "DELETE" }),
-    ]);
-    await Promise.all([
       session.completedChapters.length
-        ? this.#request("chapter_progress", { method: "POST", body: JSON.stringify(session.completedChapters.map((item) => ({ session_id: session.id, chapter_id: item.chapterId, completed_at: item.completedAt }))) })
+        ? this.#request("chapter_progress", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify(session.completedChapters.map((item) => ({ session_id: session.id, chapter_id: item.chapterId, completed_at: item.completedAt }))) })
         : Promise.resolve(),
       session.chatTurns.length
-        ? this.#request("chat_turns", { method: "POST", body: JSON.stringify(session.chatTurns.map((item) => ({ id: item.id, session_id: session.id, role: item.role, content: item.content, citations: item.citations, created_at: item.createdAt }))) })
+        ? this.#request("chat_turns", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify(session.chatTurns.map((item) => ({ id: item.id, session_id: session.id, role: item.role, content: item.content, citations: item.citations, created_at: item.createdAt }))) })
         : Promise.resolve(),
       session.drafts.length
-        ? this.#request("comment_drafts", { method: "POST", body: JSON.stringify(session.drafts.map((item) => ({ id: item.id, session_id: session.id, body: item.body, path: item.path, line: item.line, side: item.side, github_comment_url: item.githubCommentUrl ?? null, published_at: item.publishedAt ?? null, created_at: item.createdAt }))) })
+        ? this.#request("comment_drafts", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify(session.drafts.map((item) => ({ id: item.id, session_id: session.id, body: item.body, path: item.path, line: item.line, side: item.side, github_comment_url: item.githubCommentUrl ?? null, published_at: item.publishedAt ?? null, created_at: item.createdAt }))) })
         : Promise.resolve(),
     ]);
   }
@@ -121,6 +116,8 @@ export class SupabaseReviewSessionStore implements ReviewSessionStore {
     });
     if (!response.ok) throw new Error(`Supabase request failed: ${response.status} ${await response.text()}`);
     if (response.status === 204) return undefined as T;
-    return response.json() as Promise<T>;
+    const body = await response.text();
+    if (!body.trim()) return undefined as T;
+    return JSON.parse(body) as T;
   }
 }

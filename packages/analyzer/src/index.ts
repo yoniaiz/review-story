@@ -13,5 +13,11 @@ export * from "./symbol-extractor.js";
 export * from "./workspace.js";
 
 export function createAnalyzer(options: PipelineAnalyzerOptions = {}): Analyzer {
-  return new PipelineAnalyzer(options);
+  const configuredMode = process.env.ANALYZER_MODE === "deterministic"
+    ? "deterministic"
+    : undefined;
+  return new PipelineAnalyzer({
+    ...(configuredMode ? { mode: configuredMode } : {}),
+    ...options,
+  });
 }

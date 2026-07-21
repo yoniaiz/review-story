@@ -32,7 +32,7 @@ export const Stage1OutputSchema = z.object({
       track_id: StageIdSchema,
       files: z.array(NonemptyStringSchema).min(1),
     }).strict(),
-  ).min(1),
+  ).min(1).max(5),
   appendix: z.array(
     z.object({ path: NonemptyStringSchema, reason: NonemptyStringSchema }).strict(),
   ),

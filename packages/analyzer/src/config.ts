@@ -15,6 +15,7 @@ export interface AnalyzerConfig {
   stage1MaxTokens: number;
   stage2MaxTokens: number;
   stage3MaxTokens: number;
+  modelTimeoutMs: number;
   stage2Concurrency: number;
   maxFiles: number;
   maxArchiveBytes: number;
@@ -52,6 +53,7 @@ export function loadAnalyzerConfig(
       environment.ANALYZER_STAGE3_MAX_TOKENS,
       10_000,
     ),
+    modelTimeoutMs: positiveInteger(environment.ANALYZER_MODEL_TIMEOUT_MS, 45_000),
     stage2Concurrency: positiveInteger(environment.ANALYZER_CONCURRENCY, 5),
     maxFiles: positiveInteger(environment.ANALYZER_MAX_FILES, 300),
     maxArchiveBytes: positiveInteger(

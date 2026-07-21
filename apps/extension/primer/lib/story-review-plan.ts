@@ -19,8 +19,14 @@ export function storyArtifactToReviewPlan(
   };
   const statusFor = (chapterId: string): ReviewStepStatus =>
     completed.has(chapterId) ? "reviewed" : "pending";
+  const chaptersById = new Map(artifact.chapters.map((chapter) => [chapter.id, chapter]));
+  const orderedChapterIds = artifact.tracks.flatMap(({ chapter_order }) => chapter_order);
+  const orderedChapters = [
+    ...orderedChapterIds.map((id) => chaptersById.get(id)).filter((chapter) => chapter !== undefined),
+    ...artifact.chapters.filter((chapter) => !orderedChapterIds.includes(chapter.id)),
+  ];
 
-  const files = artifact.chapters.flatMap((chapter) => chapter.files.map((file) => ({
+  const files = orderedChapters.flatMap((chapter) => chapter.files.map((file) => ({
     id: file.path,
     path: file.path,
     chapterId: chapter.id,
@@ -29,7 +35,7 @@ export function storyArtifactToReviewPlan(
     summary: file.note,
   })));
 
-  const chapters = artifact.chapters.map((chapter) => ({
+  const chapters = orderedChapters.map((chapter) => ({
     id: chapter.id,
     title: chapter.title,
     summary: chapter.summary.text,

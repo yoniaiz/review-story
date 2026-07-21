@@ -151,7 +151,7 @@ describe("pipeline fallbacks", () => {
     ]);
   });
 
-  it("re-prompts incomplete placement, then creates a misc chapter", async () => {
+  it("re-prompts incomplete placement, then discards the rejected outline", async () => {
     const prompts: string[] = [];
     let modelCalls = 0;
     const client = {
@@ -186,10 +186,7 @@ describe("pipeline fallbacks", () => {
 
     expect(modelCalls).toBe(2);
     expect(prompts[1]).toContain("missing files: src/ui.ts");
-    expect(result.artifact.chapters.map(({ id }) => id)).toEqual([
-      "api",
-      "chapter-misc",
-    ]);
+    expect(result.artifact.chapters.map(({ id }) => id)).toEqual(["chapter-all-changes"]);
     expect(result.artifact.chapters.flatMap((chapter) =>
       chapter.files.map(({ path }) => path),
     )).toEqual(["src/api.ts", "src/ui.ts"]);

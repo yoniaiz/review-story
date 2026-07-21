@@ -9,6 +9,44 @@ import {
 import type { ManifestRow } from "../src/types.js";
 
 describe("assembler", () => {
+  it("builds two to five coherent fallback chapters when model grouping is unavailable", () => {
+    const manifest = [
+      row("server/api.js", "STANDARD"),
+      row("src/data/catalog.js", "SKIM"),
+      row("src/game/rewards.js", "STANDARD"),
+      row("src/store/wallet.js", "STANDARD"),
+      row("src/ui/Shop.jsx", "STANDARD"),
+      row("src/utils/money.js", "SKIM"),
+      row("vite.config.js", "SKIM"),
+    ];
+
+    const outline = buildOutline(undefined, manifest, true);
+
+    expect(outline.chapters).toHaveLength(5);
+    expect(outline.chapters.flatMap(({ files }) => files).sort()).toEqual(
+      manifest.map(({ path }) => path).sort(),
+    );
+  });
+
+  it("rejects outlines with more than five chapters", () => {
+    const manifest = Array.from({ length: 6 }, (_, index) => row(`src/file-${index}.ts`, "SKIM"));
+    const chapters = manifest.map((item, index) => ({
+      id: `chapter-${index}`,
+      title: `Chapter ${index}`,
+      track_id: "main",
+      files: [item.path],
+    }));
+    const validation = validateStage1Placement({
+      tracks: [{ id: "main", title: "Main", chapter_order: chapters.map(({ id }) => id) }],
+      chapters,
+      appendix: [],
+      context_requests: [],
+    }, manifest);
+
+    expect(validation.valid).toBe(false);
+    expect(validation.feedback).toContain("at most five chapters");
+  });
+
   it("rejects chapters ordered under a different track", () => {
     const manifest = [row("src/api.ts", "SKIM"), row("src/ui.ts", "SKIM")];
     const validation = validateStage1Placement(

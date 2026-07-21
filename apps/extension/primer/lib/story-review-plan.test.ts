@@ -16,4 +16,18 @@ describe("story artifact review plan adapter", () => {
     expect(route.every(({ step }) => step.evidence.length > 0)).toBe(true);
     expect(plan.headSha).toBe(artifact.meta.head_oid);
   });
+
+  it("uses the contract's track chapter order instead of artifact storage order", () => {
+    const artifact = StoryArtifactSchema.parse(artifactFixture);
+    const reordered = StoryArtifactSchema.parse({
+      ...artifact,
+      tracks: [{
+        ...artifact.tracks[0]!,
+        chapter_order: ["ch_login_ui", "ch_api", "ch_schema"],
+      }],
+    });
+
+    expect(storyArtifactToReviewPlan(reordered, "acme/review-story-demo").chapters
+      .map(({ id }) => id)).toEqual(["ch_login_ui", "ch_api", "ch_schema"]);
+  });
 });

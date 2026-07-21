@@ -105,7 +105,11 @@ export class StageRunner {
     this.#client =
       options.client ??
       (config.anthropicApiKey
-        ? new Anthropic({ apiKey: config.anthropicApiKey, maxRetries: 0 })
+        ? new Anthropic({
+            apiKey: config.anthropicApiKey,
+            maxRetries: 0,
+            timeout: config.modelTimeoutMs,
+          })
         : null);
     this.#usage = usage;
     this.#logger = options.logger ?? console;

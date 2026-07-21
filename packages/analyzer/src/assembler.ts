@@ -57,6 +57,9 @@ export function validateStage1Placement(
     .filter((path) => known.has(path) && !noise.has(path));
   const missingNoise = [...noise].filter((path) => !appendix.has(path));
   const issues: string[] = [];
+  if (output.chapters.length > 5) {
+    issues.push("review story must contain at most five chapters");
+  }
   if (unknown.size > 0) issues.push(`unknown files: ${preview(unknown)}`);
   if (missing.length > 0) issues.push(`missing files: ${preview(missing)}`);
   if (duplicated.length > 0) issues.push(`duplicated files: ${preview(duplicated)}`);
@@ -152,11 +155,15 @@ export function buildOutline(
   );
   if (unplaced.length > 0) {
     if (directoryFallback && !output) {
-      for (const [directory, rows] of groupByDirectory(unplaced)) {
+      const directoryGroups = groupByDirectory(unplaced);
+      for (const [directory, rows] of directoryGroups) {
+        const onlyGroup = directoryGroups.size === 1;
         const id = uniqueId(`chapter-${directory}`, "chapter-root", usedChapterIds);
         chapters.push({
-          id,
-          title: directory === "root" ? "Root-level changes" : `${directory} changes`,
+          id: onlyGroup ? "chapter-all-changes" : id,
+          title: onlyGroup
+            ? "All meaningful changes"
+            : directory === "root" ? "Root-level changes" : `${directory} changes`,
           trackId: "main",
           files: rows.map((row) => row.path),
         });
@@ -505,13 +512,36 @@ function highestAttention(levels: AttentionLevel[]): AttentionLevel {
 }
 
 function groupByDirectory(rows: ManifestRow[]): Map<string, ManifestRow[]> {
-  const groups = new Map<string, ManifestRow[]>();
+  const discovered = new Map<string, ManifestRow[]>();
   for (const row of rows) {
-    const directory = row.path.includes("/") ? row.path.split("/")[0]! : "root";
-    const group = groups.get(directory) ?? [];
+    const parts = row.path.split("/");
+    const directory = parts.length === 1
+      ? "root"
+      : parts[0] === "src" && parts.length > 2
+        ? parts.slice(0, 2).join("/")
+        : parts[0]!;
+    const group = discovered.get(directory) ?? [];
     group.push(row);
-    groups.set(directory, group);
+    discovered.set(directory, group);
   }
+  if (discovered.size <= 5) return discovered;
+
+  // Keep the four largest coherent areas and combine the long tail. This gives
+  // the UI a stable maximum of five navigable chapters even when the model times
+  // out or rejects an outline.
+  const retained = new Set(
+    [...discovered.entries()]
+      .sort((left, right) => right[1].length - left[1].length)
+      .slice(0, 4)
+      .map(([directory]) => directory),
+  );
+  const groups = new Map<string, ManifestRow[]>();
+  const other: ManifestRow[] = [];
+  for (const [directory, group] of discovered) {
+    if (retained.has(directory)) groups.set(directory, group);
+    else other.push(...group);
+  }
+  groups.set("other", other);
   return groups;
 }
 
