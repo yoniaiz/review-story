@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { browser } from "wxt/browser";
 import { DropdownMenu, Select, Tooltip } from "radix-ui";
 import {
@@ -8,6 +8,7 @@ import {
   Check,
   CheckCircle2,
   ChevronDown,
+  Circle,
   CircleDot,
   ExternalLink,
   FileCode2,
@@ -17,6 +18,8 @@ import {
   Send,
   ShieldCheck,
   Sparkles,
+  Workflow,
+  XCircle,
 } from "lucide-react";
 import {
   getPageContext,
@@ -31,8 +34,18 @@ import {
   getReviewPlanForContext,
 } from "../../primer/lib/extension-review";
 import type { ReviewPlan, ReviewStepStatus, Severity } from "../../primer/lib/review-plan";
+import { deriveChapterStatus } from "../../primer/lib/review-state";
+import {
+  sendHarnessChatMessage,
+  type HarnessChatTurn,
+} from "../../primer/lib/harness-client";
+import { isNearScrollEnd } from "../../primer/lib/chat-scroll";
 
 const TWENTY_PR = "https://github.com/twentyhq/twenty/pull/22819/files";
+const ArchitectureView = lazy(async () => {
+  const module = await import("./ArchitectureView");
+  return { default: module.ArchitectureView };
+});
 const PREVIEW_FILE = "packages/twenty-front/src/modules/object-record/record-calendar/components/RecordCalendar.tsx";
 const REPOSITORY_OPTIONS = [
   {
@@ -76,16 +89,66 @@ function getInitialContext(): GitHubPageContext {
   return getPageContext("");
 }
 
-function IconButton({ label, children }: { label: string; children: ReactNode }) {
+function IconButton({ label, children, onClick, pressed }: { label: string; children: ReactNode; onClick?: () => void; pressed?: boolean }) {
   return (
     <Tooltip.Root>
       <Tooltip.Trigger asChild>
-        <button className="icon-button" type="button" aria-label={label}>{children}</button>
+        <button className={`icon-button ${pressed ? "is-active" : ""}`} type="button" aria-label={label} aria-pressed={pressed} onClick={onClick}>{children}</button>
       </Tooltip.Trigger>
       <Tooltip.Portal>
         <Tooltip.Content className="tooltip" sideOffset={7}>{label}</Tooltip.Content>
       </Tooltip.Portal>
     </Tooltip.Root>
+  );
+}
+
+function PrimerMark() {
+  return (
+    <svg className="primer-mark" viewBox="0 0 32 32" aria-hidden="true">
+      <path className="primer-mark-route" d="M4.5 27V3.5h14c5.5 0 9 3.5 9 9s-3.5 9-9 9H13v-3h5.5c3.8 0 6-2.3 6-6s-2.2-6-6-6h-11V27z" />
+      <rect className="primer-mark-origin" x="3.5" y="2.5" width="5" height="5" />
+      <rect className="primer-mark-signal" x="22.5" y="10" width="7" height="7" />
+    </svg>
+  );
+}
+
+function StatusMark({ status }: { status: "pending" | "done" | "recheck" }) {
+  if (status === "done") return <CheckCircle2 aria-label="Reviewed" />;
+  if (status === "recheck") return <XCircle aria-label="Needs recheck" />;
+  return <Circle aria-label="Open" />;
+}
+
+function ChapterRail({ plan, route, statuses, selectedIndex, navigateTo }: {
+  plan: ReviewPlan;
+  route: ReturnType<typeof getExtensionReviewRoute>;
+  statuses: Record<string, ReviewStepStatus>;
+  selectedIndex: number;
+  navigateTo: (index: number) => void;
+}) {
+  const selected = route[selectedIndex];
+  return (
+    <nav className="chapter-rail" aria-label="Review chapters">
+      {plan.chapters.map((chapter, chapterIndex) => {
+        const chapterRoute = route.map((item, index) => ({ ...item, routeIndex: index })).filter((item) => item.chapter.id === chapter.id);
+        const chapterStatus = chapter.steps?.length ? deriveChapterStatus(chapter.steps, statuses) : chapter.status;
+        const alignment = chapterIndex < 2 ? "align-start" : chapterIndex > 2 ? "align-end" : "align-center";
+        return (
+          <div className={`chapter-rail-item ${alignment} ${selected?.chapter.id === chapter.id ? "is-current" : ""}`} key={chapter.id}>
+            <button className={`chapter-node status-${chapterStatus}`} type="button" aria-label={`Chapter ${chapterIndex + 1}: ${chapter.title}`} aria-disabled={!chapterRoute.length} onClick={() => chapterRoute[0] && navigateTo(chapterRoute[0].routeIndex)}>
+              <StatusMark status={chapterStatus} />
+            </button>
+            <span className="chapter-node-label">Ch {chapterIndex + 1}</span>
+            <div className="chapter-peek" role="group" aria-label={`${chapter.title} steps`}>
+              <div className="chapter-peek-heading"><span>Chapter {chapterIndex + 1} · {chapter.fileIds.length} files</span><strong>{chapter.title}</strong><p>{chapter.summary}</p></div>
+              {chapterRoute.length ? <div className="chapter-peek-steps">{chapterRoute.map((item) => {
+                const stepStatus = statuses[item.step.fileId] ?? item.step.status;
+                return <button className={item.routeIndex === selectedIndex ? "is-current" : ""} type="button" key={item.step.fileId} onClick={() => navigateTo(item.routeIndex)}><span className={`map-status status-${stepStatus === "reviewed" ? "done" : stepStatus}`}><StatusMark status={stepStatus === "reviewed" ? "done" : stepStatus} /></span><span><small>Step {item.step.order}</small><strong>{item.file.path.split("/").at(-1)}</strong></span></button>;
+              })}</div> : <div className="chapter-peek-empty"><span>Queued</span><code>{chapter.entryPoint.split("/").at(-1)}</code></div>}
+            </div>
+          </div>
+        );
+      })}
+    </nav>
   );
 }
 
@@ -177,6 +240,10 @@ function ReviewConversation({ context, plan }: { context: GitHubPageContext; pla
     Object.fromEntries(route.map(({ step }) => [step.fileId, step.status])),
   );
   const [composerValue, setComposerValue] = useState("");
+  const [chatTurns, setChatTurns] = useState<HarnessChatTurn[]>([]);
+  const conversationRef = useRef<HTMLDivElement>(null);
+  const followsLatestRef = useRef(true);
+  const renderedChatTurnCountRef = useRef(0);
   const [draftFeedback, setDraftFeedback] = useState<{
     tone: "working" | "success" | "error";
     message: string;
@@ -196,6 +263,20 @@ function ReviewConversation({ context, plan }: { context: GitHubPageContext; pla
     const visibleIndex = findRouteIndexByPath(route, context.activeFile);
     if (visibleIndex >= 0) setSelectedIndex(visibleIndex);
   }, [context.activeFile, route]);
+
+  useEffect(() => {
+    const previousCount = renderedChatTurnCountRef.current;
+    renderedChatTurnCountRef.current = chatTurns.length;
+    if (chatTurns.length <= previousCount || !followsLatestRef.current) return;
+
+    const conversation = conversationRef.current;
+    if (!conversation) return;
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    conversation.scrollTo({
+      top: conversation.scrollHeight,
+      behavior: reduceMotion ? "auto" : "smooth",
+    });
+  }, [chatTurns.length]);
 
   const navigateTo = (index: number) => {
     const next = route[index];
@@ -219,12 +300,23 @@ function ReviewConversation({ context, plan }: { context: GitHubPageContext; pla
   };
 
   const submitComposer = async () => {
+    const message = composerValue.trim();
+    if (!message) return;
     const command = parseCommentCommand(composerValue);
     if (!command) {
-      setDraftFeedback({
-        tone: "error",
-        message: "Live conversation is not connected yet. Use /comment to prepare a GitHub draft.",
-      });
+      followsLatestRef.current = true;
+      setDraftFeedback({ tone: "working", message: "Preparing evidence and asking Primer…" });
+      try {
+        const response = await sendHarnessChatMessage(context, message);
+        setChatTurns((current) => [...current, response.user, response.assistant]);
+        setComposerValue("");
+        setDraftFeedback(undefined);
+      } catch (error) {
+        setDraftFeedback({
+          tone: "error",
+          message: error instanceof Error ? error.message : "Primer chat is unavailable.",
+        });
+      }
       return;
     }
     if (!anchor) {
@@ -273,9 +365,25 @@ function ReviewConversation({ context, plan }: { context: GitHubPageContext; pla
     }
   };
 
+  const submitOnEnter = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
+    event.preventDefault();
+    if (composerValue.trim() && draftFeedback?.tone !== "working") void submitComposer();
+  };
+
   return (
     <>
-      <div className="conversation" aria-live="polite">
+      <div
+        className="conversation"
+        ref={conversationRef}
+        role="log"
+        aria-label="Review conversation"
+        aria-live="polite"
+        tabIndex={0}
+        onScroll={(event) => {
+          followsLatestRef.current = isNearScrollEnd(event.currentTarget);
+        }}
+      >
         <div className="opening-space" aria-hidden="true" />
         <article className="agent-turn">
           <div className="trace" aria-hidden="true"><span /></div>
@@ -335,10 +443,28 @@ function ReviewConversation({ context, plan }: { context: GitHubPageContext; pla
           </section>
         ) : null}
 
+        {chatTurns.map((turn) => (
+          <article className={`chat-turn chat-turn-${turn.role}`} key={turn.id}>
+            <p className="chat-turn-author">
+              {turn.role === "assistant" ? <><Sparkles size={12} /> Primer</> : "You"}
+            </p>
+            <p>{turn.content}</p>
+            {turn.citations.length ? (
+              <div className="chat-citations" aria-label="Response evidence">
+                {turn.citations.map((citation) => (
+                  <code key={`${citation.path}:${citation.lines.join("-")}`}>
+                    {citation.path}:{citation.lines[0]}-{citation.lines[1]}
+                  </code>
+                ))}
+              </div>
+            ) : null}
+          </article>
+        ))}
+
         <div className="suggestions" aria-label="Suggested prompts">
-          <button type="button">Explain the intent of this PR</button>
-          <button type="button">Show the highest-risk decision</button>
-          <button type="button">/evidence for this file</button>
+          <button type="button" onClick={() => setComposerValue("Explain the intent of this PR")}>Explain the intent of this PR</button>
+          <button type="button" onClick={() => setComposerValue("Show the highest-risk decision")}>Show the highest-risk decision</button>
+          <button type="button" onClick={() => setComposerValue("/evidence for this file")}>/evidence for this file</button>
         </div>
       </div>
 
@@ -368,12 +494,16 @@ function ReviewConversation({ context, plan }: { context: GitHubPageContext; pla
               setComposerValue(event.target.value);
               if (draftFeedback?.tone !== "working") setDraftFeedback(undefined);
             }}
+            onKeyDown={submitOnEnter}
           />
           <div className="composer-footer">
             <span><MessageSquareText size={13} /> /comment</span>
-            <button type="submit" aria-label="Send message" disabled={draftFeedback?.tone === "working"}><Send size={15} /></button>
+            <button type="submit" aria-label="Send message" disabled={!composerValue.trim() || draftFeedback?.tone === "working"}><Send size={15} /></button>
           </div>
         </form>
+        <div className="review-path">
+          {plan ? <ChapterRail plan={plan} route={route} statuses={statuses} selectedIndex={selectedIndex} navigateTo={navigateTo} /> : null}
+        </div>
       </footer>
     </>
   );
@@ -382,6 +512,13 @@ function ReviewConversation({ context, plan }: { context: GitHubPageContext; pla
 export function App() {
   const [context, setContext] = useState<GitHubPageContext>(getInitialContext);
   const plan = useMemo(() => getReviewPlanForContext(context), [context]);
+  const route = useMemo(() => plan ? getExtensionReviewRoute(plan) : [], [plan]);
+  const [panelView, setPanelView] = useState<"conversation" | "architecture">("conversation");
+  const mapSelectedIndex = Math.max(0, findRouteIndexByPath(route, context.activeFile));
+  const mapStatuses = useMemo<Record<string, ReviewStepStatus>>(
+    () => Object.fromEntries(route.map(({ step }) => [step.fileId, step.status])),
+    [route],
+  );
   const identity = useMemo(() => context.kind === "pull-request"
     ? `${context.owner}/${context.repository} · #${context.pullNumber}`
     : "Review companion", [context]);
@@ -408,11 +545,13 @@ export function App() {
       <main className="panel-shell">
         <header className="panel-header">
           <div className="panel-identity">
-            <span className="primer-glyph" aria-hidden="true"><i /><i /><i /></span>
+            <PrimerMark />
             <div><strong>Primer</strong><span>{identity}</span></div>
           </div>
           <div className="header-actions">
-            <IconButton label="Evidence is locally sourced"><ShieldCheck size={16} /></IconButton>
+            {plan ? (
+              <IconButton label={panelView === "architecture" ? "Return to conversation" : "Show dependency map"} pressed={panelView === "architecture"} onClick={() => setPanelView((current) => current === "architecture" ? "conversation" : "architecture")}><Workflow size={16} /></IconButton>
+            ) : <IconButton label="Evidence is locally sourced"><ShieldCheck size={16} /></IconButton>}
             <DropdownMenu.Root>
               <DropdownMenu.Trigger asChild>
                 <button className="icon-button" type="button" aria-label="Open menu"><Menu size={17} /></button>
@@ -429,9 +568,23 @@ export function App() {
           </div>
         </header>
 
-        {context.kind === "pull-request"
-          ? <ReviewConversation context={context} plan={plan} />
-          : <ContextLauncher context={context} />}
+        {context.kind === "pull-request" ? (
+          plan && panelView === "architecture" ? (
+            <Suspense fallback={<div className="architecture-loading">Preparing dependency map…</div>}>
+              <ArchitectureView
+                plan={plan}
+                route={route}
+                statuses={mapStatuses}
+                selectedIndex={mapSelectedIndex}
+                navigateTo={(index) => {
+                  const next = route[index];
+                  if (!next || new URLSearchParams(window.location.search).has("preview")) return;
+                  void browser.tabs.query({ active: true, currentWindow: true }).then(([tab]) => tab?.id === undefined ? undefined : browser.tabs.sendMessage(tab.id, { type: "primer:navigate-file", path: next.file.path })).catch(() => undefined);
+                }}
+              />
+            </Suspense>
+          ) : <ReviewConversation context={context} plan={plan} />
+        ) : <ContextLauncher context={context} />}
       </main>
     </Tooltip.Provider>
   );

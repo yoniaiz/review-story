@@ -12,9 +12,15 @@ export default defineConfig({
     permissions: ["tabs", "storage"],
     host_permissions: [
       "https://github.com/*",
+      "http://127.0.0.1:8787/*",
+      "http://localhost:8787/*",
     ],
     action: {
       default_title: "Open Primer",
+    },
+    content_security_policy: {
+      extension_pages:
+        "script-src 'self'; object-src 'self'; connect-src 'self' http://127.0.0.1:8787 http://localhost:8787",
     },
   },
 });
