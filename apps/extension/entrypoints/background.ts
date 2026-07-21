@@ -3,6 +3,7 @@ import { defineBackground } from "wxt/utils/define-background";
 import {
   getPageContext,
   isPrimerExtensionMessage,
+  reconcilePageContext,
   type GitHubPageContext,
   type PrimerExtensionMessage,
 } from "../primer/lib/extension-context";
@@ -13,12 +14,12 @@ async function requestTabContext(tabId: number, fallbackUrl = ""): Promise<GitHu
   try {
     const context = await browser.tabs.sendMessage(tabId, { type: "primer:request-context" });
     if (context && typeof context === "object" && "kind" in context) {
-      return context as GitHubPageContext;
+      return reconcilePageContext(fallbackUrl, context as GitHubPageContext);
     }
   } catch {
     // Content scripts are intentionally unavailable outside GitHub.
   }
-  return contextByTab.get(tabId) ?? getPageContext(fallbackUrl);
+  return reconcilePageContext(fallbackUrl, contextByTab.get(tabId));
 }
 
 async function broadcastActiveContext(tabId: number, url = ""): Promise<void> {
@@ -58,11 +59,20 @@ export default defineBackground(() => {
   });
 
   browser.tabs.onUpdated.addListener((tabId, change, tab) => {
-    if (change.url || change.status === "complete") {
+    // GitHub tabs in the background continue to mutate and navigate. Only the
+    // active tab may drive the side panel; otherwise an unrelated repository
+    // can replace the PR context that the reviewer is actually looking at.
+    if (tab.active && (change.url || change.status === "complete")) {
       void broadcastActiveContext(tabId, change.url ?? tab.url);
     }
   });
 
+  browser.webNavigation.onHistoryStateUpdated.addListener(({ tabId, frameId, url }) => {
+    if (frameId !== 0) return;
+    void browser.tabs.get(tabId).then((tab) => {
+      if (tab.active) void broadcastActiveContext(tabId, url);
+    }).catch(() => undefined);
+  });
+
   browser.tabs.onRemoved.addListener((tabId) => contextByTab.delete(tabId));
 });
-

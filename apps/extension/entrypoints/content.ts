@@ -1,6 +1,6 @@
 import { browser } from "wxt/browser";
 import { defineContentScript } from "wxt/utils/define-content-script";
-import { getPageContext, isPrimerExtensionMessage } from "../primer/lib/extension-context";
+import { getPageContext, isPrimerExtensionMessage, isSameGitCommit } from "../primer/lib/extension-context";
 import type { CommentDraftResult, DiffAnchor, DiffSide } from "../primer/lib/extension-context";
 import {
   createDiffAnchor,
@@ -8,10 +8,75 @@ import {
   parseDiffCellId,
   type DiffPoint,
 } from "../primer/lib/github-diff-anchor";
+import {
+  createGitHubDiffFragment,
+  createPullFilesUrl,
+} from "../primer/lib/github-navigation";
+import { normalizeGitHubFilePath } from "../primer/lib/github-file-path";
 
-const FILE_SELECTOR = "[data-file-path], .file[data-path], [data-testid='diff-file'], copilot-diff-entry";
+const FILE_SELECTOR = [
+  "[data-file-path]",
+  ".file[data-path]",
+  "[data-testid='diff-file']",
+  "copilot-diff-entry",
+  // GitHub's React diff container uses the file's `diff-<sha256>` fragment as
+  // its id; line ids append an uppercase L/R suffix and are excluded here.
+  "[id^='diff-']:not([id*='L']):not([id*='R'])",
+].join(", ");
 const LINE_SELECTOR = "[data-line-number], [data-line], td.blob-num, [id*='diff-'][id*='L'], [id*='diff-'][id*='R']";
 const RESIZE_SETTLE_MS = 80;
+const DIFF_SCROLL_MIN_MS = 700;
+const DIFF_SCROLL_MAX_MS = 1_300;
+const DIFF_SCROLL_STICKY_OFFSET = 88;
+let activeDiffScrollFrame: number | undefined;
+
+type DiffScrollBlock = "start" | "center";
+
+function diffScrollTop(target: Element, block: DiffScrollBlock): number {
+  const rect = target.getBoundingClientRect();
+  const absoluteTop = window.scrollY + rect.top;
+  const desiredTop = block === "center"
+    ? absoluteTop - (window.innerHeight - rect.height) / 2
+    : absoluteTop - DIFF_SCROLL_STICKY_OFFSET;
+  const maxScrollTop = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+  return Math.min(maxScrollTop, Math.max(0, desiredTop));
+}
+
+function animateDiffScroll(target: Element, block: DiffScrollBlock): void {
+  if (activeDiffScrollFrame !== undefined) {
+    window.cancelAnimationFrame(activeDiffScrollFrame);
+    activeDiffScrollFrame = undefined;
+  }
+
+  const startTop = window.scrollY;
+  const targetTop = diffScrollTop(target, block);
+  const distance = targetTop - startTop;
+  if (Math.abs(distance) < 2 || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    window.scrollTo({ top: targetTop, behavior: "auto" });
+    return;
+  }
+
+  // Native smooth scrolling is intentionally browser-timed and can look like
+  // a snap across a large PR. Keep the demo movement legible and predictable.
+  const duration = Math.min(
+    DIFF_SCROLL_MAX_MS,
+    Math.max(DIFF_SCROLL_MIN_MS, DIFF_SCROLL_MIN_MS + Math.abs(distance) * 0.08),
+  );
+  const startedAt = performance.now();
+  const tick = (now: number) => {
+    const progress = Math.min(1, (now - startedAt) / duration);
+    const eased = progress < 0.5
+      ? 4 * progress ** 3
+      : 1 - ((-2 * progress + 2) ** 3) / 2;
+    window.scrollTo({ top: startTop + distance * eased, behavior: "auto" });
+    if (progress < 1) {
+      activeDiffScrollFrame = window.requestAnimationFrame(tick);
+    } else {
+      activeDiffScrollFrame = undefined;
+    }
+  };
+  activeDiffScrollFrame = window.requestAnimationFrame(tick);
+}
 
 function visibleHeight(element: Element): number {
   const rect = element.getBoundingClientRect();
@@ -20,30 +85,56 @@ function visibleHeight(element: Element): number {
 
 function readFilePath(element: Element): string | undefined {
   const direct = element.getAttribute("data-file-path") ?? element.getAttribute("data-path");
-  if (direct) return direct;
+  if (direct) return normalizeGitHubFilePath(direct);
 
   const label = element.querySelector<HTMLElement>(
     "[data-file-path], [data-path], .file-info a, a.Link--primary[href*='#diff-']",
   );
-  return label?.getAttribute("data-file-path")
+  return normalizeGitHubFilePath(label?.getAttribute("data-file-path")
     ?? label?.getAttribute("data-path")
     ?? label?.textContent?.trim()
-    ?? undefined;
+    ?? undefined);
 }
 
 function findVisibleFile(): string | undefined {
-  const candidates = Array.from(document.querySelectorAll(FILE_SELECTOR));
+  const viewportCenter = window.innerHeight / 2;
+  const candidates = Array.from(document.querySelectorAll(FILE_SELECTOR))
+    .map((element) => {
+      const rect = element.getBoundingClientRect();
+      return {
+        path: readFilePath(element),
+        top: rect.top,
+        bottom: rect.bottom,
+        height: visibleHeight(element),
+        distance: Math.abs((rect.top + rect.bottom) / 2 - viewportCenter),
+      };
+    })
+    .filter((candidate): candidate is typeof candidate & { path: string } => Boolean(candidate.path));
   const visible = candidates
-    .map((element) => ({ element, height: visibleHeight(element) }))
     .filter(({ height }) => height > 0)
-    .sort((left, right) => right.height - left.height)[0]?.element;
-  return visible ? readFilePath(visible) : undefined;
+    .sort((left, right) => left.distance - right.distance)[0];
+  if (visible) return visible.path;
+
+  // GitHub's current diff UI puts data-file-path on a short file-header
+  // button, not on the full diff container. While reviewing the body that
+  // header is usually just above the viewport, so use the nearest preceding
+  // header as the active file instead of dropping back to "Waiting".
+  return candidates
+    .filter(({ top }) => top <= viewportCenter)
+    .sort((left, right) => right.top - left.top)[0]?.path
+    ?? candidates.sort((left, right) => left.distance - right.distance)[0]?.path;
 }
 
 function findFileElement(path?: string): Element | undefined {
   if (!path) return undefined;
   return Array.from(document.querySelectorAll(FILE_SELECTOR))
-    .find((element) => readFilePath(element) === path);
+    .filter((element) => readFilePath(element) === path)
+    .sort((left, right) => fileElementScore(right) - fileElementScore(left))[0];
+}
+
+function fileElementScore(element: Element): number {
+  const rect = element.getBoundingClientRect();
+  return (element.querySelector(LINE_SELECTOR) ? 2 : 0) + (rect.height > 60 ? 1 : 0);
 }
 
 function readHeadSha(): string | undefined {
@@ -176,12 +267,108 @@ function findActiveAnchor(activeFile?: string): DiffAnchor | undefined {
     ?? (activeFile ? findVisibleAnchor(activeFile, headSha) : undefined);
 }
 
-function scrollToFile(path: string): boolean {
-  const candidates = Array.from(document.querySelectorAll(FILE_SELECTOR));
-  const target = candidates.find((element) => readFilePath(element) === path);
+function scrollToMountedDiff(
+  path: string,
+  line?: number,
+  side: DiffSide = "RIGHT",
+  exactLineOnly = false,
+): boolean {
+  const target = findFileElement(path);
   if (!target) return false;
-  target.scrollIntoView({ behavior: "smooth", block: "start" });
+  const lineTarget = line
+    ? Array.from(target.querySelectorAll(LINE_SELECTOR)).find((element) => {
+        const point = pointFromLineElement(element, path);
+        return point?.line === line && point.side === side;
+      })
+    : undefined;
+  if (line && exactLineOnly && !lineTarget) return false;
+  const scrollTarget = lineTarget?.closest("tr, [role='row'], [data-testid='diff-line']") ?? lineTarget ?? target;
+  animateDiffScroll(scrollTarget, lineTarget ? "center" : "start");
+  if (scrollTarget instanceof HTMLElement) {
+    scrollTarget.animate(
+      [
+        { outline: "2px solid transparent", outlineOffset: "2px" },
+        { outline: "2px solid #315cf5", outlineOffset: "2px" },
+        { outline: "2px solid transparent", outlineOffset: "2px" },
+      ],
+      { duration: 1_400, easing: "ease-out" },
+    );
+  }
   return true;
+}
+
+function waitForMountedLine(
+  path: string,
+  line: number,
+  side: DiffSide,
+  timeoutMs = 2_000,
+): Promise<boolean> {
+  if (scrollToMountedDiff(path, line, side, true)) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const timeout = window.setTimeout(() => {
+      observer.disconnect();
+      resolve(false);
+    }, timeoutMs);
+    const observer = new MutationObserver(() => {
+      if (!scrollToMountedDiff(path, line, side, true)) return;
+      window.clearTimeout(timeout);
+      observer.disconnect();
+      resolve(true);
+    });
+    observer.observe(document.documentElement, { childList: true, subtree: true });
+  });
+}
+
+async function navigateToDiff(path: string, line?: number, side: DiffSide = "RIGHT"): Promise<boolean> {
+  if (scrollToMountedDiff(path, line, side)) return true;
+
+  // If GitHub has not mounted the file yet, navigate to the stable file
+  // fragment first. Exact line scrolling is retried once the diff is mounted;
+  // line fragments do not exist for collapsed or large unloaded diffs.
+  const fragment = await createGitHubDiffFragment(path);
+  const filesUrl = createPullFilesUrl(window.location.href, fragment);
+  if (!filesUrl) return false;
+
+  const onFilesChanged = /\/pull\/\d+\/(?:files|changes)(?:\/|$)/.test(window.location.pathname);
+  if (!onFilesChanged) {
+    window.location.assign(filesUrl);
+    return true;
+  }
+
+  // GitHub often keeps a lightweight per-file anchor mounted even when its
+  // diff rows are virtualized. Scroll to that placeholder ourselves so the
+  // virtualizer can hydrate it without an immediate browser hash jump.
+  const fragmentTarget = document.getElementById(fragment);
+  if (fragmentTarget) {
+    animateDiffScroll(fragmentTarget, "start");
+    if (line) void waitForMountedLine(path, line, side);
+    return true;
+  }
+
+  // GitHub's diff is virtualized. Its native file/line fragment asks the PR
+  // router to mount the relevant diff even when no matching element exists yet.
+  if (window.location.hash !== `#${fragment}`) {
+    window.location.hash = fragment;
+    if (line) void waitForMountedLine(path, line, side);
+    return true;
+  }
+
+  const nativeLink = Array.from(document.querySelectorAll<HTMLAnchorElement>("a[href]"))
+    .find((link) => link.getAttribute("href")?.endsWith(`#${fragment}`));
+  if (nativeLink) {
+    nativeLink.click();
+    if (line) void waitForMountedLine(path, line, side);
+    return true;
+  }
+
+  window.location.assign(filesUrl);
+  return true;
+}
+
+async function navigateToAnchor(anchor: DiffAnchor): Promise<boolean> {
+  const currentHeadSha = readHeadSha();
+  if (currentHeadSha && !isSameGitCommit(currentHeadSha, anchor.headSha)) return false;
+  return navigateToDiff(anchor.path, anchor.line, anchor.side);
 }
 
 function findAnchorLineElement(anchor: DiffAnchor): Element | undefined {
@@ -276,7 +463,7 @@ function fillCommentComposer(composer: HTMLElement, body: string): void {
 async function draftNativeComment(anchor: DiffAnchor, body: string): Promise<CommentDraftResult> {
   if (!body.trim()) return { ok: false, error: "invalid-request" };
   const currentHeadSha = readHeadSha();
-  if (!currentHeadSha || currentHeadSha !== anchor.headSha) {
+  if (!currentHeadSha || !isSameGitCommit(currentHeadSha, anchor.headSha)) {
     return { ok: false, error: "stale-anchor" };
   }
 
@@ -404,6 +591,10 @@ export default defineContentScript({
     ctx.addEventListener(window, "popstate", schedulePublishForNextFrame);
     ctx.onInvalidated(() => {
       observer.disconnect();
+      if (activeDiffScrollFrame !== undefined) {
+        window.cancelAnimationFrame(activeDiffScrollFrame);
+        activeDiffScrollFrame = undefined;
+      }
       if (scheduledFrame !== undefined) window.cancelAnimationFrame(scheduledFrame);
       if (mutationTimer !== undefined) window.clearTimeout(mutationTimer);
       if (viewportResizeTimer !== undefined) window.clearTimeout(viewportResizeTimer);
@@ -413,7 +604,10 @@ export default defineContentScript({
     browser.runtime.onMessage.addListener((message) => {
       if (!isPrimerExtensionMessage(message)) return undefined;
       if (message.type === "primer:request-context") return Promise.resolve(readContext());
-      if (message.type === "primer:navigate-file") return Promise.resolve(scrollToFile(message.path));
+      if (message.type === "primer:navigate-file") {
+        return navigateToDiff(message.path, message.line, message.side);
+      }
+      if (message.type === "primer:navigate-anchor") return navigateToAnchor(message.anchor);
       if (message.type === "primer:draft-comment") {
         return draftNativeComment(message.anchor, message.body);
       }

@@ -47,7 +47,8 @@ export type PrimerExtensionMessage =
   | { type: "primer:context-observed"; context: GitHubPageContext }
   | { type: "primer:get-active-context" }
   | { type: "primer:request-context" }
-  | { type: "primer:navigate-file"; path: string }
+  | { type: "primer:navigate-file"; path: string; line?: number; side?: DiffSide }
+  | { type: "primer:navigate-anchor"; anchor: DiffAnchor }
   | { type: "primer:draft-comment"; anchor: DiffAnchor; body: string }
   | { type: "primer:active-context-changed"; tabId: number; context: GitHubPageContext };
 
@@ -104,7 +105,15 @@ export function isPrimerExtensionMessage(value: unknown): value is PrimerExtensi
 
   if (value.type === "primer:get-active-context" || value.type === "primer:request-context") return true;
   if (value.type === "primer:navigate-file") {
-    return "path" in value && typeof value.path === "string" && value.path.length > 0;
+    return "path" in value
+      && typeof value.path === "string"
+      && value.path.length > 0
+      && (!("line" in value) || value.line === undefined
+        || (typeof value.line === "number" && Number.isInteger(value.line) && value.line > 0))
+      && (!("side" in value) || value.side === undefined || value.side === "LEFT" || value.side === "RIGHT");
+  }
+  if (value.type === "primer:navigate-anchor") {
+    return "anchor" in value && isDiffAnchor(value.anchor);
   }
   if (value.type === "primer:draft-comment") {
     return "anchor" in value
@@ -119,6 +128,50 @@ export function isPrimerExtensionMessage(value: unknown): value is PrimerExtensi
   return value.type === "primer:active-context-changed"
     && "tabId" in value
     && typeof value.tabId === "number";
+}
+
+/**
+ * Runtime messages are delivered to every extension page. Accept a context
+ * broadcast only when it belongs to the tab that is active in this panel's
+ * window. Raw content-script observations deliberately do not qualify because
+ * they do not carry a tab id and may originate from a background GitHub tab.
+ */
+export function activeContextFromMessage(
+  message: PrimerExtensionMessage,
+  activeTabId: number | undefined,
+): GitHubPageContext | undefined {
+  return message.type === "primer:active-context-changed"
+    && message.tabId === activeTabId
+    ? message.context
+    : undefined;
+}
+
+/**
+ * Treat the browser tab URL as authoritative for page identity while retaining
+ * richer DOM observations (head SHA, visible file, and anchor) only when they
+ * describe that same page. This prevents a cached repository or previous-PR
+ * observation from surviving GitHub's client-side navigation.
+ */
+export function reconcilePageContext(
+  urlValue: string,
+  observed?: GitHubPageContext,
+): GitHubPageContext {
+  if (!urlValue) return observed ?? getPageContext(urlValue);
+  const fromUrl = getPageContext(urlValue);
+  if (!observed || !isSamePageIdentity(fromUrl, observed)) return fromUrl;
+  return {
+    ...fromUrl,
+    ...(observed.headSha ? { headSha: observed.headSha } : {}),
+    ...(observed.activeFile ? { activeFile: observed.activeFile } : {}),
+    ...(observed.activeAnchor ? { activeAnchor: observed.activeAnchor } : {}),
+  };
+}
+
+function isSamePageIdentity(left: GitHubPageContext, right: GitHubPageContext): boolean {
+  if (left.kind !== right.kind) return false;
+  if (left.kind === "outside-github") return left.url === right.url;
+  if (left.owner !== right.owner || left.repository !== right.repository) return false;
+  return left.kind !== "pull-request" || left.pullNumber === right.pullNumber;
 }
 
 function isGitHubPageContext(value: unknown): value is GitHubPageContext {
@@ -166,4 +219,11 @@ export function isCommentDraftResult(value: unknown): value is CommentDraftResul
   return result.ok === false
     && typeof result.error === "string"
     && COMMENT_DRAFT_FAILURES.includes(result.error as CommentDraftFailure);
+}
+
+export function isSameGitCommit(left: string, right: string): boolean {
+  const first = left.trim().toLowerCase();
+  const second = right.trim().toLowerCase();
+  if (!/^[a-f0-9]{7,64}$/.test(first) || !/^[a-f0-9]{7,64}$/.test(second)) return false;
+  return first.startsWith(second) || second.startsWith(first);
 }
