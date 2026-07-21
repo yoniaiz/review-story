@@ -97,6 +97,27 @@ function getInitialContext(): GitHubPageContext {
   return getPageContext("");
 }
 
+async function navigateGitHubToFile(path: string): Promise<void> {
+  if (new URLSearchParams(window.location.search).has("preview")) return;
+  const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+  if (tab?.id === undefined) return;
+
+  const scrolled = await browser.tabs.sendMessage(tab.id, {
+    type: "primer:navigate-file",
+    path,
+  }).then((result) => result === true).catch(() => false);
+  if (scrolled || !tab.url) return;
+
+  // GitHub's stable file anchor is `diff-${sha256(path)}`. Updating the active
+  // tab fragment gives navigation a reliable fallback when the content script
+  // was not injected into an already-open PR tab.
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(path));
+  const hash = [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  const destination = new URL(tab.url);
+  destination.hash = `diff-${hash}`;
+  await browser.tabs.update(tab.id, { url: destination.href });
+}
+
 function IconButton({ label, children, onClick, pressed }: { label: string; children: ReactNode; onClick?: () => void; pressed?: boolean }) {
   return (
     <Tooltip.Root>
@@ -270,6 +291,7 @@ function LiveReview({ context, panelView }: {
       try {
         const parsed = StoryStreamEventSchema.parse(JSON.parse(raw.data));
         if (parsed.type === "story.skeleton") {
+          setError(undefined);
           setGenerationProgress({ completed: 0, total: parsed.data.chapters.length });
           setSession((current) => current ? { ...current, status: "GENERATING", skeleton: parsed.data } : current);
         }
@@ -308,9 +330,10 @@ function LiveReview({ context, panelView }: {
     }
     source.onerror = () => {
       if (settled) return;
-      source.close();
-      setError(`Could not reach the review harness at ${harnessConfig.apiBaseUrl}.`);
-      setPhase("idle");
+      // EventSource reconnects automatically. A transient SSE close is expected
+      // during local dev reloads and must not turn a healthy stored generation
+      // into a terminal connection error.
+      setPhase("generating");
     };
   };
 
@@ -368,10 +391,7 @@ function LiveReview({ context, panelView }: {
               if (next.chapter.id !== session.currentChapterId) {
                 void client.selectChapter(session.id, next.chapter.id).then(setSession).catch(() => undefined);
               }
-              if (new URLSearchParams(window.location.search).has("preview")) return;
-              void browser.tabs.query({ active: true, currentWindow: true }).then(([tab]) => tab?.id === undefined
-                ? undefined
-                : browser.tabs.sendMessage(tab.id, { type: "primer:navigate-file", path: next.file.path })).catch(() => undefined);
+              void navigateGitHubToFile(next.file.path);
             }}
           />
         </Suspense>
@@ -433,6 +453,7 @@ function ReviewConversation({ context, plan, session, client, onSessionChange }:
     message: string;
   }>();
   const selected = route[selectedIndex];
+  const selectedFilePath = selected?.file.path;
   const selectedStatus = selected ? statuses[selected.step.fileId] ?? selected.step.status : "pending";
   const severity = selected?.file.severity ?? "standard";
   const chapterNumber = selected ? plan.chapters.indexOf(selected.chapter) + 1 : 0;
@@ -462,6 +483,15 @@ function ReviewConversation({ context, plan, session, client, onSessionChange }:
   }, [context.activeFile, route]);
 
   useEffect(() => {
+    if (!selectedFilePath || context.activeFile === selectedFilePath) return;
+    void navigateGitHubToFile(selectedFilePath);
+    // Only a side-panel route change should initiate GitHub navigation. When
+    // GitHub scrolling changes activeFile, the effect above first selects its
+    // matching route and this effect then sees both files already aligned.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedFilePath]);
+
+  useEffect(() => {
     const previousCount = renderedChatTurnCountRef.current;
     renderedChatTurnCountRef.current = session.chatTurns.length;
     if (session.chatTurns.length <= previousCount || !followsLatestRef.current) return;
@@ -489,13 +519,6 @@ function ReviewConversation({ context, plan, session, client, onSessionChange }:
         });
       }
     }
-    if (new URLSearchParams(window.location.search).has("preview")) return;
-    void browser.tabs.query({ active: true, currentWindow: true }).then(([tab]) => {
-      if (tab?.id !== undefined) {
-        return browser.tabs.sendMessage(tab.id, { type: "primer:navigate-file", path: next.file.path });
-      }
-      return undefined;
-    }).catch(() => undefined);
   };
 
   const completeSelected = async () => {
@@ -736,18 +759,47 @@ export function App() {
   useEffect(() => {
     if (new URLSearchParams(window.location.search).has("preview")) return undefined;
 
-    void browser.runtime.sendMessage({ type: "primer:get-active-context" }).then((next) => {
-      if (next && typeof next === "object" && "kind" in next) setContext(next as GitHubPageContext);
-    });
+    const refreshActiveContext = async () => {
+      const next = await browser.runtime.sendMessage({ type: "primer:get-active-context" }).catch(() => undefined);
+      if (next && typeof next === "object" && "kind" in next) {
+        const observed = next as GitHubPageContext;
+        if (observed.kind === "pull-request") {
+          setContext(observed);
+          return;
+        }
+      }
+
+      // A freshly reloaded unpacked extension may not yet have a content script
+      // in an already-open GitHub tab. The active tab URL is still authoritative
+      // enough to identify the PR and expose the Start Analyze action.
+      const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+      const fromActiveTab = getPageContext(tab?.url ?? "");
+      if (fromActiveTab.kind === "pull-request") setContext(fromActiveTab);
+      else if (next && typeof next === "object" && "kind" in next) setContext(next as GitHubPageContext);
+    };
+
+    void refreshActiveContext();
 
     const listener = (message: unknown) => {
       if (!isPrimerExtensionMessage(message)) return undefined;
-      if (message.type === "primer:active-context-changed") setContext(message.context);
-      if (message.type === "primer:context-observed") setContext(message.context);
+      if (message.type === "primer:active-context-changed" || message.type === "primer:context-observed") {
+        if (message.context.kind === "pull-request") setContext(message.context);
+        else void refreshActiveContext();
+      }
       return undefined;
     };
     browser.runtime.onMessage.addListener(listener);
-    return () => browser.runtime.onMessage.removeListener(listener);
+    const onActivated = () => void refreshActiveContext();
+    const onUpdated = (_tabId: number, change: { status?: string; url?: string }) => {
+      if (change.url || change.status === "complete") void refreshActiveContext();
+    };
+    browser.tabs.onActivated.addListener(onActivated);
+    browser.tabs.onUpdated.addListener(onUpdated);
+    return () => {
+      browser.runtime.onMessage.removeListener(listener);
+      browser.tabs.onActivated.removeListener(onActivated);
+      browser.tabs.onUpdated.removeListener(onUpdated);
+    };
   }, []);
 
   return (
