@@ -82,7 +82,7 @@ export class SupabaseReviewSessionStore implements ReviewSessionStore {
         ? this.#request("chapter_progress", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify(session.completedChapters.map((item) => ({ session_id: session.id, chapter_id: item.chapterId, completed_at: item.completedAt }))) })
         : Promise.resolve(),
       session.chatTurns.length
-        ? this.#request("chat_turns", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify(session.chatTurns.map((item) => ({ id: item.id, session_id: session.id, role: item.role, content: item.content, citations: item.citations, created_at: item.createdAt }))) })
+        ? this.#request("chat_turns", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify(session.chatTurns.map((item) => ({ id: item.id, session_id: session.id, chapter_id: item.chapterId, step_id: item.stepId, role: item.role, content: item.content, citations: item.citations, created_at: item.createdAt }))) })
         : Promise.resolve(),
       session.drafts.length
         ? this.#request("comment_drafts", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify(session.drafts.map((item) => ({ id: item.id, session_id: session.id, body: item.body, path: item.path, line: item.line, side: item.side, github_comment_url: item.githubCommentUrl ?? null, published_at: item.publishedAt ?? null, created_at: item.createdAt }))) })
@@ -93,14 +93,16 @@ export class SupabaseReviewSessionStore implements ReviewSessionStore {
   async #hydrate(row: SessionRow): Promise<ReviewSession> {
     const [progress, turns, drafts] = await Promise.all([
       this.#request<Array<{ chapter_id: string; completed_at: string }>>(`chapter_progress?session_id=eq.${encodeURIComponent(row.id)}&select=chapter_id,completed_at`),
-      this.#request<Array<{ id: string; role: "user" | "assistant" | "tool"; content: string; citations: ReviewSession["chatTurns"][number]["citations"]; created_at: string }>>(`chat_turns?session_id=eq.${encodeURIComponent(row.id)}&select=id,role,content,citations,created_at&order=created_at.asc`),
+      this.#request<Array<{ id: string; chapter_id: string | null; step_id: string | null; role: "user" | "assistant" | "tool"; content: string; citations: ReviewSession["chatTurns"][number]["citations"]; created_at: string }>>(`chat_turns?session_id=eq.${encodeURIComponent(row.id)}&select=id,chapter_id,step_id,role,content,citations,created_at&order=created_at.asc`),
       this.#request<Array<{ id: string; body: string; path: string; line: number; side: "LEFT" | "RIGHT"; github_comment_url: string | null; published_at: string | null; created_at: string }>>(`comment_drafts?session_id=eq.${encodeURIComponent(row.id)}&select=*&order=created_at.asc`),
     ]);
     return {
       id: row.id, owner: row.owner, repo: row.repo, pullNumber: row.pull_number, headSha: row.head_sha,
       status: row.status, ...(row.current_chapter_id ? { currentChapterId: row.current_chapter_id } : {}),
       completedChapters: progress.map((item) => ({ chapterId: item.chapter_id, completedAt: item.completed_at })),
-      chatTurns: turns.map((item) => ({ id: item.id, role: item.role, content: item.content, citations: item.citations, createdAt: item.created_at })),
+      chatTurns: turns.flatMap((item) => item.chapter_id && item.step_id
+        ? [{ id: item.id, chapterId: item.chapter_id, stepId: item.step_id, role: item.role, content: item.content, citations: item.citations, createdAt: item.created_at }]
+        : []),
       drafts: drafts.map((item) => ({ id: item.id, body: item.body, path: item.path, line: item.line, side: item.side, createdAt: item.created_at, ...(item.published_at ? { publishedAt: item.published_at } : {}), ...(item.github_comment_url ? { githubCommentUrl: item.github_comment_url } : {}) })),
       ...(row.artifact ? { artifact: row.artifact } : {}), ...(row.skeleton ? { skeleton: row.skeleton } : {}), ...(row.error ? { error: row.error } : {}),
       createdAt: row.created_at, updatedAt: row.updated_at,

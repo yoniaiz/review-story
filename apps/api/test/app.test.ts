@@ -95,6 +95,65 @@ describe("story API", () => {
     expect(current.json().status).toBe("READY");
   });
 
+  it("requires a valid step scope and stores chat turns against that step", async () => {
+    const app = await buildApp({
+      analyzer: new StaticAnalyzer({ streamDelayMs: 0 }),
+      chatEngine: {
+        async reply({ scope }) {
+          return { text: `Reply for ${scope.stepId}`, citations: [] };
+        },
+      },
+    });
+    apps.push(app);
+
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/prs/acme/review-story-demo/pulls/123/review-sessions",
+      payload: { headSha: "8b7b7e55f69a26d3c249f9ddba8f1c8c26f986aa" },
+    });
+    const sessionId = created.json().id as string;
+    await app.inject({ method: "GET", url: `/api/review-sessions/${sessionId}/events` });
+    const ready = await app.inject({ method: "GET", url: `/api/review-sessions/${sessionId}` });
+    const chapter = ready.json().artifact.chapters[0] as {
+      id: string;
+      files: Array<{ path: string }>;
+    };
+    const scope = { chapterId: chapter.id, stepId: chapter.files[0]!.path };
+
+    const unscoped = await app.inject({
+      method: "POST",
+      url: `/api/review-sessions/${sessionId}/chat/messages`,
+      payload: { message: "What matters here?" },
+    });
+    expect(unscoped.statusCode).toBe(400);
+    expect(unscoped.json().error).toBe("chat_scope_required");
+
+    const invalid = await app.inject({
+      method: "POST",
+      url: `/api/review-sessions/${sessionId}/chat/messages`,
+      payload: { message: "What matters here?", chapterId: chapter.id, stepId: "src/not-a-step.ts" },
+    });
+    expect(invalid.statusCode).toBe(409);
+    expect(invalid.json().error).toBe("step_not_ready");
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/review-sessions/${sessionId}/chat/messages`,
+      payload: { message: "What matters here?", ...scope },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      user: scope,
+      assistant: { ...scope, content: `Reply for ${scope.stepId}` },
+    });
+
+    const updated = await app.inject({ method: "GET", url: `/api/review-sessions/${sessionId}` });
+    expect(updated.json().chatTurns).toEqual([
+      expect.objectContaining({ ...scope, role: "user" }),
+      expect.objectContaining({ ...scope, role: "assistant" }),
+    ]);
+  });
+
   it("deduplicates concurrent cold streams and serves the next open from cache", async () => {
     const analyzer = new CountingAnalyzer();
     const app = await testApp(analyzer);

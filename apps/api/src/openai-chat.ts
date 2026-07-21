@@ -1,5 +1,10 @@
 import type { Evidence } from "@review-story/contracts";
-import type { ReviewSession } from "./review-session.js";
+import { chatTurnsForStep, type ReviewSession } from "./review-session.js";
+
+export interface ChatStepScope {
+  chapterId: string;
+  stepId: string;
+}
 
 export interface ChatReply {
   text: string;
@@ -8,7 +13,7 @@ export interface ChatReply {
 }
 
 export interface ChatEngine {
-  reply(input: { session: ReviewSession; message: string }): Promise<ChatReply>;
+  reply(input: { session: ReviewSession; message: string; scope: ChatStepScope }): Promise<ChatReply>;
 }
 
 /**
@@ -23,9 +28,9 @@ export class OpenAiResponsesChatEngine implements ChatEngine {
     this.#apiKey = apiKey ?? process.env.OPENAI_API_KEY;
   }
 
-  async reply({ session, message }: { session: ReviewSession; message: string }): Promise<ChatReply> {
+  async reply({ session, message, scope }: { session: ReviewSession; message: string; scope: ChatStepScope }): Promise<ChatReply> {
     if (process.env.ANALYZER_MODE === "deterministic") {
-      return deterministicEvidenceReply(session, message);
+      return deterministicEvidenceReply(session, message, scope);
     }
     if (!this.#apiKey) {
       throw new Error("OPENAI_API_KEY is required to use chat");
@@ -37,11 +42,20 @@ export class OpenAiResponsesChatEngine implements ChatEngine {
       };
     }
 
+    const scopedTurns = chatTurnsForStep(session, scope);
+    const currentMessageIndex = scopedTurns.reduce(
+      (found, turn, index) => turn.role === "user" && turn.content === message ? index : found,
+      -1,
+    );
+    const priorHistory = currentMessageIndex >= 0
+      ? scopedTurns.slice(0, currentMessageIndex)
+      : scopedTurns;
     const context = {
-      currentChapterId: session.currentChapterId ?? null,
+      currentChapterId: scope.chapterId,
+      currentStepId: scope.stepId,
       completedChapterIds: session.completedChapters.map(({ chapterId }) => chapterId),
       artifact: session.artifact,
-      history: session.chatTurns.slice(-12).map(({ role, content }) => ({ role, content })),
+      history: priorHistory.slice(-12).map(({ role, content }) => ({ role, content })),
     };
     const response = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
@@ -65,13 +79,13 @@ export class OpenAiResponsesChatEngine implements ChatEngine {
       }),
     }).catch(() => undefined);
     if (!response?.ok) {
-      return deterministicEvidenceReply(session, message);
+      return deterministicEvidenceReply(session, message, scope);
     }
     const payload = await response.json() as { id?: string; output_text?: string };
     const text = payload.output_text?.trim() || "I could not produce a review response.";
     const citations = extractAndValidateCitations(text, session);
     if (!citations.length && /[.!?]/.test(text)) {
-      return deterministicEvidenceReply(session, message);
+      return deterministicEvidenceReply(session, message, scope);
     }
     return {
       text,
@@ -81,7 +95,11 @@ export class OpenAiResponsesChatEngine implements ChatEngine {
   }
 }
 
-function deterministicEvidenceReply(session: ReviewSession, message: string): ChatReply {
+function deterministicEvidenceReply(
+  session: ReviewSession,
+  message: string,
+  scope: ChatStepScope,
+): ChatReply {
   const artifact = session.artifact;
   if (!artifact) {
     return {
@@ -97,7 +115,7 @@ function deterministicEvidenceReply(session: ReviewSession, message: string): Ch
     };
   }
 
-  const current = artifact.chapters.find(({ id }) => id === session.currentChapterId);
+  const current = artifact.chapters.find(({ id }) => id === scope.chapterId);
   const highestRisk = [...artifact.chapters].sort((left, right) =>
     attentionRank(right.attention.level) - attentionRank(left.attention.level))[0];
   const chapter = /\b(risk|danger|scrutinize|concern)\b/i.test(message)

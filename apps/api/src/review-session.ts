@@ -11,6 +11,8 @@ export interface ChapterProgress {
 
 export interface ChatTurn {
   id: string;
+  chapterId: string;
+  stepId: string;
   role: ChatRole;
   content: string;
   citations: Array<{ path: string; lines: [number, number] }>;
@@ -110,6 +112,15 @@ export function addChatTurn(
   };
   session.chatTurns.push(stored);
   return stored;
+}
+
+export function chatTurnsForStep(
+  session: ReviewSession,
+  scope: Pick<ChatTurn, "chapterId" | "stepId">,
+): ChatTurn[] {
+  return session.chatTurns.filter(
+    (turn) => turn.chapterId === scope.chapterId && turn.stepId === scope.stepId,
+  );
 }
 
 export function completeChapter(session: ReviewSession, chapterId: string): void {

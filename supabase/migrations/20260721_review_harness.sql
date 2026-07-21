@@ -27,11 +27,20 @@ create table if not exists chapter_progress (
 create table if not exists chat_turns (
   id uuid primary key,
   session_id uuid not null references review_sessions(id) on delete cascade,
+  chapter_id text,
+  step_id text,
   role text not null,
   content text not null,
   citations jsonb not null default '[]'::jsonb,
   created_at timestamptz not null default now()
 );
+
+-- Existing deployments may already have chat_turns. Legacy unscoped rows remain
+-- stored but are not hydrated into a review; every new turn is step-scoped.
+alter table chat_turns add column if not exists chapter_id text;
+alter table chat_turns add column if not exists step_id text;
+create index if not exists chat_turns_step_history
+  on chat_turns (session_id, chapter_id, step_id, created_at);
 
 create table if not exists comment_drafts (
   id uuid primary key,
