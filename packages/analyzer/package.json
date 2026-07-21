@@ -1,0 +1,21 @@
+{
+  "name": "@review-story/analyzer",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "cli": "tsx src/cli.ts",
+    "check": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@review-story/contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "tsx": "4.23.1"
+  }
+}
+

@@ -1,0 +1,24 @@
+{
+  "name": "review-story",
+  "private": true,
+  "version": "0.0.0",
+  "packageManager": "pnpm@11.9.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "pnpm --parallel --filter @review-story/api --filter @review-story/extension dev",
+    "dev:api": "pnpm --filter @review-story/api dev",
+    "dev:extension": "pnpm --filter @review-story/extension dev",
+    "analyze:mock": "pnpm --filter @review-story/analyzer cli",
+    "build": "pnpm -r --if-present build",
+    "check": "pnpm -r --if-present check",
+    "test": "pnpm -r --if-present test"
+  },
+  "devDependencies": {
+    "@types/node": "26.1.1",
+    "typescript": "7.0.2",
+    "vitest": "4.1.10"
+  }
+}
+

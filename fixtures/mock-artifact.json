@@ -1,0 +1,242 @@
+{
+  "meta": {
+    "repo_node_id": "R_demo_review_story",
+    "pr": 123,
+    "head_oid": "8b7b7e55f69a26d3c249f9ddba8f1c8c26f986aa",
+    "versions": {
+      "analyzer": 1,
+      "prompt": 1,
+      "schema": 1
+    },
+    "status": "READY"
+  },
+  "exec_summary": {
+    "text": "Adds rotating refresh tokens across the session schema, API boundary, and login experience. The highest-risk handoff is concurrent token rotation in the API.",
+    "evidence": [
+      {
+        "path": "src/api/auth/refresh.ts",
+        "lines": [38, 92]
+      },
+      {
+        "path": "src/db/schema/session.ts",
+        "lines": [14, 41]
+      }
+    ]
+  },
+  "tracks": [
+    {
+      "id": "trk_refresh",
+      "title": "Refresh-token rotation",
+      "entry_points": [
+        {
+          "persona": "backend",
+          "start_chapter": "ch_schema",
+          "note": "Start with token persistence, then read outward to the API."
+        },
+        {
+          "persona": "frontend",
+          "start_chapter": "ch_login_ui",
+          "note": "Start with the user-visible retry flow, then follow it inward."
+        },
+        {
+          "persona": "security",
+          "start_chapter": "ch_api",
+          "note": "Start at the rotation boundary and failure paths."
+        }
+      ],
+      "flow": [
+        {
+          "chapter_id": "ch_login_ui",
+          "label": "Login UI",
+          "kind": "code"
+        },
+        {
+          "chapter_id": "ch_api",
+          "label": "Auth API",
+          "kind": "code"
+        },
+        {
+          "chapter_id": null,
+          "label": "Auth0",
+          "kind": "external",
+          "evidence": [
+            {
+              "path": "src/api/auth/client.ts",
+              "lines": [1, 18]
+            }
+          ]
+        },
+        {
+          "chapter_id": "ch_schema",
+          "label": "Sessions table",
+          "kind": "code"
+        }
+      ],
+      "chapter_order": ["ch_schema", "ch_api", "ch_login_ui"]
+    }
+  ],
+  "chapters": [
+    {
+      "id": "ch_schema",
+      "title": "Persist token families",
+      "summary": {
+        "text": "The session record now stores a hashed refresh token, its family identifier, and the last rotation time.",
+        "kind": "observed",
+        "evidence": [
+          {
+            "path": "src/db/schema/session.ts",
+            "lines": [14, 41]
+          }
+        ]
+      },
+      "files": [
+        {
+          "path": "src/db/schema/session.ts",
+          "note": "adds refresh-token family and rotation columns",
+          "anchor_hunks": [[14, 41]]
+        },
+        {
+          "path": "src/db/migrations/024_refresh_tokens.sql",
+          "note": "backfills token-family IDs before making them required",
+          "anchor_hunks": [[1, 32]]
+        }
+      ],
+      "scrutinize": [
+        {
+          "text": "Confirm the migration is safe for sessions created during a rolling deploy.",
+          "kind": "inferred",
+          "evidence": [
+            {
+              "path": "src/db/migrations/024_refresh_tokens.sql",
+              "lines": [8, 29]
+            }
+          ]
+        }
+      ],
+      "related_tests": {
+        "status": "found",
+        "note": "session repository tests reference the new token-family fields",
+        "search_scope": "src/**/*.test.ts, test/**"
+      },
+      "attention": {
+        "level": "STANDARD",
+        "floor": "STANDARD",
+        "reasons": ["database migration", "session credential storage"]
+      }
+    },
+    {
+      "id": "ch_api",
+      "title": "Rotate refresh tokens atomically",
+      "summary": {
+        "text": "The refresh endpoint exchanges a valid token once, revokes the token family on replay, and returns a replacement pair.",
+        "kind": "inferred",
+        "evidence": [
+          {
+            "path": "src/api/auth/refresh.ts",
+            "lines": [38, 92]
+          }
+        ]
+      },
+      "files": [
+        {
+          "path": "src/api/auth/refresh.ts",
+          "note": "implements one-time refresh and replay handling",
+          "anchor_hunks": [[38, 92]]
+        },
+        {
+          "path": "src/api/auth/client.ts",
+          "note": "wraps the external identity-provider token exchange",
+          "anchor_hunks": [[1, 48]]
+        }
+      ],
+      "scrutinize": [
+        {
+          "text": "Two concurrent refreshes may both pass the read before either token hash is replaced.",
+          "kind": "inferred",
+          "evidence": [
+            {
+              "path": "src/api/auth/refresh.ts",
+              "lines": [54, 76]
+            }
+          ]
+        },
+        {
+          "text": "Verify that identity-provider failures do not revoke an otherwise valid local session.",
+          "kind": "inferred",
+          "evidence": [
+            {
+              "path": "src/api/auth/refresh.ts",
+              "lines": [78, 92]
+            }
+          ]
+        }
+      ],
+      "related_tests": {
+        "status": "found",
+        "note": "refresh endpoint tests reference both the success and replay paths",
+        "search_scope": "src/**/*.test.ts, test/**"
+      },
+      "attention": {
+        "level": "DEEP_READ",
+        "floor": "STANDARD",
+        "reasons": ["authentication boundary", "concurrent state transition"]
+      }
+    },
+    {
+      "id": "ch_login_ui",
+      "title": "Retry expired browser sessions",
+      "summary": {
+        "text": "The web client retries one failed request after refreshing, then returns the user to login if rotation fails.",
+        "kind": "inferred",
+        "evidence": [
+          {
+            "path": "src/web/auth/session-client.ts",
+            "lines": [22, 71]
+          }
+        ]
+      },
+      "files": [
+        {
+          "path": "src/web/auth/session-client.ts",
+          "note": "deduplicates refresh requests and retries the original call once",
+          "anchor_hunks": [[22, 71]]
+        },
+        {
+          "path": "src/web/login/LoginPage.tsx",
+          "note": "shows an expired-session message after refresh failure",
+          "anchor_hunks": [[44, 63]]
+        }
+      ],
+      "scrutinize": [
+        {
+          "text": "Confirm the retry guard prevents loops when the refresh endpoint itself returns 401.",
+          "kind": "inferred",
+          "evidence": [
+            {
+              "path": "src/web/auth/session-client.ts",
+              "lines": [46, 68]
+            }
+          ]
+        }
+      ],
+      "related_tests": {
+        "status": "none_found",
+        "note": "no direct textual references to the changed session-client symbols were found",
+        "search_scope": "src/**/*.test.tsx, test/**, __tests__/**"
+      },
+      "attention": {
+        "level": "STANDARD",
+        "floor": "STANDARD",
+        "reasons": ["authentication client", "request retry behavior"]
+      }
+    }
+  ],
+  "appendix": {
+    "files": ["pnpm-lock.yaml", "src/generated/api-types.ts"],
+    "reasons": {
+      "pnpm-lock.yaml": "lockfile",
+      "src/generated/api-types.ts": "generated output"
+    }
+  }
+}
+

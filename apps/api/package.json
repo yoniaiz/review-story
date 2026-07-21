@@ -1,0 +1,24 @@
+{
+  "name": "@review-story/api",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsup",
+    "start": "node dist/server.js",
+    "check": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@fastify/cors": "11.3.0",
+    "@review-story/analyzer": "workspace:*",
+    "@review-story/contracts": "workspace:*",
+    "fastify": "5.10.0"
+  },
+  "devDependencies": {
+    "tsup": "8.5.1",
+    "tsx": "4.23.1"
+  }
+}
+
