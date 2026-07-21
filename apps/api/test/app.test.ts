@@ -5,6 +5,7 @@ import { join } from "node:path";
 import type { AnalyzeRequest, Analyzer, AnalyzerContext } from "@review-story/contracts";
 import { afterEach, describe, expect, it } from "vitest";
 import { buildApp } from "../src/app.js";
+import type { GitHubPullReader } from "../src/github-pulls.js";
 
 const apps: Awaited<ReturnType<typeof buildApp>>[] = [];
 const temporaryDirectories: string[] = [];
@@ -17,6 +18,39 @@ afterEach(async () => {
 });
 
 describe("story API", () => {
+  it("lists repository pull requests for the extension launcher", async () => {
+    const githubPullReader = fakePullReader();
+    const app = await buildApp({ githubPullReader });
+    apps.push(app);
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/github/repos/acme/widgets/pulls",
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().pulls).toEqual([
+      expect.objectContaining({ number: 42, title: "Improve widgets", headSha: "abc123def456" }),
+    ]);
+  });
+
+  it("resolves the current pull request head for DOM-independent startup", async () => {
+    const githubPullReader = fakePullReader();
+    const app = await buildApp({ githubPullReader });
+    apps.push(app);
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/github/repos/acme/widgets/pulls/42",
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      number: 42,
+      headSha: "abc123def456",
+    });
+  });
+
   it("serves a schema-valid story", async () => {
     const app = await testApp(new StaticAnalyzer({ streamDelayMs: 0 }));
     apps.push(app);
@@ -242,4 +276,25 @@ class MismatchedIdentityAnalyzer extends CountingAnalyzer {
     const identity = await super.identify(request, context);
     return { ...identity, head_oid: "stale-head" };
   }
+}
+
+function fakePullReader(): GitHubPullReader {
+  const pull = {
+    number: 42,
+    title: "Improve widgets",
+    state: "open" as const,
+    draft: false,
+    headSha: "abc123def456",
+    updatedAt: "2026-07-22T00:00:00Z",
+    author: "octocat",
+  };
+  return {
+    async list() {
+      return [pull];
+    },
+    async get(_owner, _repo, pullNumber) {
+      if (pullNumber !== pull.number) throw new Error("not found");
+      return pull;
+    },
+  };
 }

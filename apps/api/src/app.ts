@@ -20,6 +20,11 @@ import {
 } from "./review-session.js";
 import { OpenAiResponsesChatEngine, type ChatEngine } from "./openai-chat.js";
 import { GitHubPendingReviewPublisher, type GitHubPublisher } from "./github-publisher.js";
+import {
+  GitHubPullReaderError,
+  GitHubRestPullReader,
+  type GitHubPullReader,
+} from "./github-pulls.js";
 import { SupabaseReviewSessionStore } from "./supabase-session-store.js";
 import { StoryCache } from "./story-cache.js";
 import { StoryService } from "./story-service.js";
@@ -30,6 +35,11 @@ interface StoryRouteParams {
   pullNumber: string;
 }
 
+interface RepositoryRouteParams {
+  owner: string;
+  repo: string;
+}
+
 export interface BuildAppOptions {
   analyzer?: Analyzer;
   cache?: StoryCache;
@@ -38,6 +48,7 @@ export interface BuildAppOptions {
   sessions?: ReviewSessionStore;
   chatEngine?: ChatEngine;
   githubPublisher?: GitHubPublisher;
+  githubPullReader?: GitHubPullReader;
 }
 
 export async function buildApp(
@@ -48,6 +59,7 @@ export async function buildApp(
   const sessions = options.sessions ?? createSessionStore();
   const chatEngine = options.chatEngine ?? new OpenAiResponsesChatEngine();
   const githubPublisher = options.githubPublisher ?? new GitHubPendingReviewPublisher();
+  const githubPullReader = options.githubPullReader ?? new GitHubRestPullReader();
   const cache =
     options.cache ??
     new StoryCache(
@@ -75,6 +87,37 @@ export async function buildApp(
   }
 
   app.get("/health", async () => ({ status: "ok" }));
+
+  app.get<{ Params: RepositoryRouteParams }>(
+    "/api/github/repos/:owner/:repo/pulls",
+    async (request, reply) => {
+      if (!validRepositoryParams(request.params)) {
+        return reply.code(400).send({ error: "invalid_request" });
+      }
+      try {
+        return { pulls: await githubPullReader.list(request.params.owner, request.params.repo) };
+      } catch (error) {
+        return githubReadFailure(reply, error);
+      }
+    },
+  );
+
+  app.get<{ Params: StoryRouteParams }>(
+    "/api/github/repos/:owner/:repo/pulls/:pullNumber",
+    async (request, reply) => {
+      const requestData = parseRouteParams(request.params);
+      if (!requestData.success) return invalidRequest(reply, requestData.error.flatten());
+      try {
+        return githubPullReader.get(
+          requestData.data.owner,
+          requestData.data.repo,
+          requestData.data.pullNumber,
+        );
+      } catch (error) {
+        return githubReadFailure(reply, error);
+      }
+    },
+  );
 
   app.get<{ Params: StoryRouteParams; Querystring: { headSha?: string } }>(
     "/api/prs/:owner/:repo/pulls/:pullNumber/review-sessions/current",
@@ -396,6 +439,24 @@ function invalidRequest(
   details: unknown,
 ) {
   return reply.code(400).send({ error: "invalid_request", details });
+}
+
+function validRepositoryParams(params: RepositoryRouteParams): boolean {
+  return Boolean(params.owner.trim() && params.repo.trim());
+}
+
+function githubReadFailure(
+  reply: { code(statusCode: number): { send(payload: unknown): unknown } },
+  error: unknown,
+) {
+  if (error instanceof GitHubPullReaderError) {
+    const status = error.status === 404 ? 404 : error.status === 403 ? 403 : 502;
+    return reply.code(status).send({ error: "github_read_failed", message: error.message });
+  }
+  return reply.code(502).send({
+    error: "github_read_failed",
+    message: error instanceof Error ? error.message : "GitHub pull request lookup failed",
+  });
 }
 
 function parseRouteParams(params: StoryRouteParams) {
