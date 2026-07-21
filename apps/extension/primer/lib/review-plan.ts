@@ -14,6 +14,8 @@ export interface ReviewStep {
   order: number;
   reason: string;
   evidence: ReviewEvidence[];
+  line?: number;
+  side?: "LEFT" | "RIGHT";
   patch?: string;
   status: ReviewStepStatus;
 }
@@ -175,6 +177,12 @@ export function validateReviewPlan(
       if (!step.reason.trim()) {
         errors.push(`Chapter ${chapter.id} step ${step.fileId} must include a reason.`);
       }
+      if (step.line !== undefined && (!Number.isInteger(step.line) || step.line < 1)) {
+        errors.push(`Chapter ${chapter.id} step ${step.fileId} has an invalid diff line.`);
+      }
+      if (step.side !== undefined && step.side !== "LEFT" && step.side !== "RIGHT") {
+        errors.push(`Chapter ${chapter.id} step ${step.fileId} has an invalid diff side.`);
+      }
       if (step.evidence.length === 0) {
         errors.push(`Chapter ${chapter.id} step ${step.fileId} must include evidence.`);
       }
@@ -244,4 +252,3 @@ export function validateReviewPlan(
 
   return errors;
 }
-

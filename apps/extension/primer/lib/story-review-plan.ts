@@ -35,21 +35,32 @@ export function storyArtifactToReviewPlan(
     summary: file.note,
   })));
 
-  const chapters = orderedChapters.map((chapter) => ({
-    id: chapter.id,
-    title: chapter.title,
-    summary: chapter.summary.text,
-    entryPoint: chapter.files[0]!.path,
-    fileIds: chapter.files.map(({ path }) => path),
-    status: completed.has(chapter.id) ? "done" as const : "pending" as const,
-    steps: chapter.files.map((file, index) => ({
-      fileId: file.path,
-      order: index + 1,
-      reason: file.note,
-      evidence: evidenceForFile(artifact, chapter, file.path),
-      status: statusFor(chapter.id),
-    })),
-  }));
+  const chapters = orderedChapters.map((chapter) => {
+    const summaryEntryPoint = chapter.summary.evidence.find((evidence) =>
+      chapter.files.some((file) => file.path === evidence.path));
+    return {
+      id: chapter.id,
+      title: chapter.title,
+      summary: chapter.summary.text,
+      entryPoint: summaryEntryPoint?.path ?? chapter.files[0]!.path,
+      fileIds: chapter.files.map(({ path }) => path),
+      status: completed.has(chapter.id) ? "done" as const : "pending" as const,
+      steps: chapter.files.map((file, index) => {
+        const claimAnchor = [chapter.summary, ...chapter.scrutinize]
+          .flatMap((claim) => claim.evidence)
+          .find((evidence) => evidence.path === file.path);
+        const line = claimAnchor?.lines[0] ?? file.anchor_hunks[0]?.[0];
+        return {
+          fileId: file.path,
+          order: index + 1,
+          reason: file.note,
+          evidence: evidenceForFile(artifact, chapter, file.path),
+          ...(line ? { line, side: "RIGHT" as const } : {}),
+          status: statusFor(chapter.id),
+        };
+      }),
+    };
+  });
 
   return {
     repo,

@@ -14,6 +14,8 @@ describe("story artifact review plan adapter", () => {
     expect(plan.chapters.find(({ id }) => id === "ch_api")?.status).toBe("done");
     expect(route.find(({ chapter }) => chapter.id === "ch_api")?.step.status).toBe("reviewed");
     expect(route.every(({ step }) => step.evidence.length > 0)).toBe(true);
+    expect(route.every(({ step }) => step.line === undefined || step.line > 0)).toBe(true);
+    expect(plan.chapters.every(({ entryPoint, fileIds }) => fileIds.includes(entryPoint))).toBe(true);
     expect(plan.headSha).toBe(artifact.meta.head_oid);
   });
 

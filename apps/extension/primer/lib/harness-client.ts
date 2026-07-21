@@ -4,6 +4,8 @@ export type ReviewSessionStatus = "NEW" | "GENERATING" | "READY" | "FAILED";
 
 export interface HarnessChatTurn {
   id: string;
+  chapterId: string;
+  stepId: string;
   role: "user" | "assistant" | "tool";
   content: string;
   citations: Array<{ path: string; lines: [number, number] }>;
@@ -44,11 +46,36 @@ export interface HarnessConfig {
   accessToken?: string;
 }
 
+export interface GitHubPullSummary {
+  number: number;
+  title: string;
+  state: "open" | "closed";
+  draft: boolean;
+  headSha: string;
+  updatedAt: string;
+  author?: string;
+}
+
 export class HarnessClient {
   readonly #config: HarnessConfig;
 
   constructor(config: HarnessConfig) {
     this.#config = config;
+  }
+
+  async listPullRequests(owner: string, repo: string): Promise<GitHubPullSummary[]> {
+    const result = await this.#request<{ pulls: GitHubPullSummary[] }>(
+      `/api/github/repos/${segment(owner)}/${segment(repo)}/pulls`,
+      { method: "GET" },
+    );
+    return result.pulls;
+  }
+
+  async getPullRequest(owner: string, repo: string, pullNumber: number): Promise<GitHubPullSummary> {
+    return this.#request(
+      `/api/github/repos/${segment(owner)}/${segment(repo)}/pulls/${pullNumber}`,
+      { method: "GET" },
+    );
   }
 
   async createOrResume(input: {
@@ -81,13 +108,17 @@ export class HarnessClient {
     );
   }
 
-  async sendChatMessage(sessionId: string, message: string): Promise<{
+  async sendChatMessage(sessionId: string, input: {
+    message: string;
+    chapterId: string;
+    stepId: string;
+  }): Promise<{
     user: HarnessChatTurn;
     assistant: HarnessChatTurn;
   }> {
     return this.#request(`/api/review-sessions/${segment(sessionId)}/chat/messages`, {
       method: "POST",
-      body: JSON.stringify({ message }),
+      body: JSON.stringify(input),
     });
   }
 
