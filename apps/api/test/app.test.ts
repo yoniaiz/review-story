@@ -60,4 +60,34 @@ describe("story API", () => {
       "story.ready",
     ]);
   });
+
+  it("creates a head-scoped session and streams analysis only after start", async () => {
+    const app = await buildApp({
+      analyzer: new StaticAnalyzer({ streamDelayMs: 0 }),
+    });
+    apps.push(app);
+
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/prs/acme/review-story-demo/pulls/123/review-sessions",
+      payload: { headSha: "8b7b7e55f69a26d3c249f9ddba8f1c8c26f986aa" },
+    });
+    expect(created.statusCode).toBe(201);
+    const session = created.json() as { id: string; status: string };
+    expect(session.status).toBe("NEW");
+
+    const stream = await app.inject({
+      method: "GET",
+      url: `/api/review-sessions/${session.id}/events`,
+    });
+    expect(stream.statusCode).toBe(200);
+    expect(stream.payload).toContain("event: story.ready");
+
+    const current = await app.inject({
+      method: "GET",
+      url: "/api/prs/acme/review-story-demo/pulls/123/review-sessions/current?headSha=8b7b7e55f69a26d3c249f9ddba8f1c8c26f986aa",
+    });
+    expect(current.statusCode).toBe(200);
+    expect(current.json().status).toBe("READY");
+  });
 });

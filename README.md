@@ -70,6 +70,14 @@ Failures use `story.error`. Every event contains `{ "type": "...", "data": ... }
 
 The real analyzer should implement the existing `Analyzer` interface in `packages/contracts/src/index.ts`. The harness owns calling it, associating its result with a reviewer session, and exposing it to the extension; its API does not need to change when static generation is replaced.
 
+## Agent / chat harness
+
+The extension starts review explicitly: **Start review** creates (or resumes) a session for the configured PR head SHA, then connects to the session SSE stream. A different head SHA creates a fresh session. The harness owns selected/completed chapters, structured chat turns, evidence citations, and comment drafts.
+
+For local development, sessions are in memory. For hosted persistence, run [`supabase/migrations/20260721_review_harness.sql`](./supabase/migrations/20260721_review_harness.sql) in a Supabase project, then set `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` on the API host. Set `OPENAI_API_KEY` for GPT-5.6 Terra chat and `GITHUB_PAT` for the explicit pending-review publish endpoint. These must be server-only environment variables. Set a random `HARNESS_ACCESS_TOKEN` to require a bearer token.
+
+Chat uses the OpenAI Responses API with `gpt-5.6-terra`, `store: false`, and evidence validation. It can complete the current chapter through conversation; creating a GitHub pending-review comment always requires the separate confirmed publish endpoint.
+
 ## Useful commands
 
 ```bash
@@ -86,9 +94,9 @@ Copy `.env.example` to `.env` to override the demo repository, local API address
 
 ## What is intentionally stubbed
 
-- The analyzer reads the static fixture and simulates progressive generation.
 - GitHub navigation uses the native file/tree/hash fallback ladder, but still needs the design's spike against the chosen demo PR.
-- **Copy comment** works; **Stage** is visibly reserved for the backend pending-review API.
-- Authentication, persistence, GitHub API calls, session-aware chat orchestration, and round-two/delta behavior remain separate hackathon slices.
+- The current analyzer reads the static fixture and simulates progressive generation; swap in a real analyzer behind the same seam.
+- Hosted persistence requires a Supabase project and migration; local development intentionally uses an in-memory store.
+- The harness is single-user and protects secrets server-side; production OAuth and multi-user authorization are still future work.
 
 Before sharing a branch, run `pnpm run check && pnpm test && pnpm build`.
