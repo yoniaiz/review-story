@@ -18,6 +18,7 @@ export interface GitHubPageContext {
   owner?: string;
   repository?: string;
   pullNumber?: number;
+  headSha?: string;
   activeFile?: string;
   activeAnchor?: DiffAnchor;
   observedAt: string;
@@ -56,6 +57,7 @@ export function getPageContext(
   urlValue: string,
   activeFile?: string,
   activeAnchor?: DiffAnchor,
+  headSha?: string,
 ): GitHubPageContext {
   const observedAt = new Date().toISOString();
   let url: URL;
@@ -78,6 +80,7 @@ export function getPageContext(
       owner: pullRequest[1]!,
       repository: pullRequest[2]!,
       pullNumber: Number(pullRequest[3]),
+      ...(headSha ?? activeAnchor?.headSha ? { headSha: headSha ?? activeAnchor!.headSha } : {}),
       ...(observedFile ? { activeFile: observedFile } : {}),
       ...(activeAnchor ? { activeAnchor } : {}),
       observedAt,
@@ -127,6 +130,7 @@ function isGitHubPageContext(value: unknown): value is GitHubPageContext {
     && (context.owner === undefined || typeof context.owner === "string")
     && (context.repository === undefined || typeof context.repository === "string")
     && (context.pullNumber === undefined || typeof context.pullNumber === "number")
+    && (context.headSha === undefined || typeof context.headSha === "string")
     && (context.activeFile === undefined || typeof context.activeFile === "string")
     && (context.activeAnchor === undefined || isDiffAnchor(context.activeAnchor));
 }

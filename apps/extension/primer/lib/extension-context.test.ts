@@ -20,6 +20,18 @@ describe("getPageContext", () => {
     });
   });
 
+  it("preserves a head SHA even when no diff line is visible", () => {
+    expect(getPageContext(
+      "https://github.com/acme/widgets/pull/42/files",
+      undefined,
+      undefined,
+      "abc123def456",
+    )).toMatchObject({
+      kind: "pull-request",
+      headSha: "abc123def456",
+    });
+  });
+
   it("treats repository pages as GitHub context without inventing a PR", () => {
     expect(getPageContext("https://github.com/twentyhq/twenty/issues")).toMatchObject({
       kind: "github",
@@ -101,4 +113,3 @@ describe("getPageContext", () => {
     expect(isCommentDraftResult({ ok: true, status: "submitted" })).toBe(false);
   });
 });
-

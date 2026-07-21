@@ -10,8 +10,10 @@
     "dev": "pnpm --parallel --filter @review-story/api --filter @review-story/extension dev",
     "dev:api": "pnpm --filter @review-story/api dev",
     "dev:extension": "pnpm --filter @review-story/extension dev",
+    "analyze": "pnpm --filter @review-story/analyzer cli",
+    "analyze:tracer": "pnpm --filter @review-story/analyzer cli --deterministic",
     "analyze:mock": "pnpm --filter @review-story/analyzer cli",
-    "build": "pnpm -r --if-present build",
+    "build": "pnpm -r --if-present build && pnpm --filter @review-story/api smoke",
     "check": "pnpm -r --if-present check",
     "test": "pnpm -r --if-present test"
   },
@@ -21,4 +23,3 @@
     "vitest": "4.1.10"
   }
 }
-

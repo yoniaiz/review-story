@@ -51,6 +51,7 @@ function readHeadSha(): string | undefined {
     "meta[name='pull-request-head-sha']",
     "[data-pull-request-head-sha]",
     "[data-head-commit-oid]",
+    "[data-head-ref-oid]",
     "[data-head-sha]",
   ];
   for (const selector of selectors) {
@@ -58,6 +59,7 @@ function readHeadSha(): string | undefined {
     const value = element?.getAttribute("content")
       ?? element?.getAttribute("data-pull-request-head-sha")
       ?? element?.getAttribute("data-head-commit-oid")
+      ?? element?.getAttribute("data-head-ref-oid")
       ?? element?.getAttribute("data-head-sha");
     if (value && /^[a-f0-9]{7,64}$/i.test(value)) return value;
   }
@@ -307,7 +309,8 @@ export default defineContentScript({
 
     const readContext = () => {
       const activeFile = findVisibleFile();
-      return getPageContext(window.location.href, activeFile, findActiveAnchor(activeFile));
+      const headSha = readHeadSha();
+      return getPageContext(window.location.href, activeFile, findActiveAnchor(activeFile), headSha);
     };
     const publish = () => {
       scheduledFrame = undefined;
@@ -316,6 +319,7 @@ export default defineContentScript({
       const signature = [
         context.url,
         context.activeFile,
+        context.headSha,
         anchor?.headSha,
         anchor?.startSide,
         anchor?.startLine,

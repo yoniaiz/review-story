@@ -30,14 +30,18 @@ Do not add visited state, current chapter, reviewer identity, comment drafts, ch
 
 ## Analyzer boundary
 
-`Analyzer` has two methods:
+`Analyzer` has three methods:
 
 ```ts
 interface Analyzer {
+  identify(
+    request: AnalyzeRequest,
+    context?: AnalyzerContext,
+  ): Promise<StoryCacheIdentity>;
   analyze(
     request: AnalyzeRequest,
     context?: AnalyzerContext,
-  ): Promise<StoryArtifact>;
+  ): Promise<AnalyzeResult>;
   stream(
     request: AnalyzeRequest,
     context?: AnalyzerContext,
@@ -45,7 +49,9 @@ interface Analyzer {
 }
 ```
 
-The initial `StaticAnalyzer` proves the full path. The analysis-layer owner can replace its internals stage by stage while continuing to return the same types. Long-running model/provider calls must propagate `context.signal`; the harness aborts it when the SSE consumer disconnects. Invalid fixture or model output fails at `StoryArtifactSchema.parse`, before it reaches the harness or UI.
+`AnalyzeResult` contains `{ artifact, diff_snapshot, usage }`. The richer value stays behind the API boundary so the API can persist a complete generation snapshot while the REST and SSE payloads remain artifact-focused. `identify` resolves the repo node id, head OID, PR, and versions needed for a cache lookup without running generation.
+
+Long-running GitHub and model calls propagate `context.signal`; the harness aborts a shared generation job when its final consumer disconnects. Invalid final output fails at `StoryArtifactSchema.parse` before it reaches the harness or UI. `StaticAnalyzer` remains available only as a test/fixture adapter.
 
 ## Agent / chat harness boundary
 
@@ -57,18 +63,21 @@ SSE event names and payloads:
 
 | Event | Payload | Meaning |
 |---|---|---|
-| `story.skeleton` | `StorySkeleton` | Tracks and provisional chapter titles are available |
+| `story.skeleton` | `StorySkeleton` | Track ids/titles/provisional chapter order, chapter titles, and appendix are available; entry points and flow are intentionally absent |
 | `story.chapter` | `Chapter` | One complete chapter is ready |
 | `story.ready` | `StoryArtifact` | Final validated artifact and order |
 | `story.error` | `{ message }` | Generation failed |
 
 ## Frontend boundary
 
-The side panel imports the same fixture as its zero-backend fallback. In live mode it talks only to the agent/chat harness, validates all received events before applying them, and communicates with the GitHub content script through two messages:
+The side panel talks only to the agent/chat harness. It creates or resumes a review session for the visible PR head, validates every streamed story event before applying it, and converts the final shared artifact into Primer's review-plan view. Reviewer progress, chat turns, and drafts stay in the session response rather than the artifact.
+
+GitHub DOM work remains in the content script. The extension uses the validated `primer:*` message protocol, including:
 
 ```ts
-{ type: "review-story:navigate", path: string, line?: number }
-{ type: "review-story:visible-file", path: string }
+{ type: "primer:context-observed", context: GitHubPageContext }
+{ type: "primer:navigate-file", path: string }
+{ type: "primer:draft-comment", anchor: DiffAnchor, body: string }
 ```
 
 Keep direct GitHub DOM work inside `apps/extension/entrypoints/content.ts`. The React panel should only send or receive these messages, which keeps UI iteration independent of the sync spike.

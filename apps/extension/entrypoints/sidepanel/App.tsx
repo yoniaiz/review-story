@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { browser } from "wxt/browser";
+import { StoryArtifactSchema, StoryStreamEventSchema } from "@review-story/contracts";
 import { DropdownMenu, Select, Tooltip } from "radix-ui";
 import {
   AlertCircle,
@@ -14,13 +15,13 @@ import {
   GitPullRequest,
   Menu,
   MessageSquareText,
+  LoaderCircle,
   Send,
   ShieldCheck,
   Sparkles,
 } from "lucide-react";
 import {
   getPageContext,
-  isCommentDraftResult,
   isPrimerExtensionMessage,
   type GitHubPageContext,
 } from "../../primer/lib/extension-context";
@@ -28,12 +29,23 @@ import { createFallbackCommentDraft, parseCommentCommand } from "../../primer/li
 import {
   findRouteIndexByPath,
   getExtensionReviewRoute,
-  getReviewPlanForContext,
 } from "../../primer/lib/extension-review";
 import type { ReviewPlan, ReviewStepStatus, Severity } from "../../primer/lib/review-plan";
+import {
+  HarnessClient,
+  type HarnessDraft,
+  type HarnessSession,
+} from "../../primer/lib/harness-client";
+import { storyArtifactToReviewPlan } from "../../primer/lib/story-review-plan";
 
 const TWENTY_PR = "https://github.com/twentyhq/twenty/pull/22819/files";
 const PREVIEW_FILE = "packages/twenty-front/src/modules/object-record/record-calendar/components/RecordCalendar.tsx";
+const harnessConfig = {
+  apiBaseUrl: import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8787",
+  ...(import.meta.env.VITE_HARNESS_ACCESS_TOKEN
+    ? { accessToken: import.meta.env.VITE_HARNESS_ACCESS_TOKEN }
+    : {}),
+};
 const REPOSITORY_OPTIONS = [
   {
     value: "twentyhq/twenty",
@@ -54,14 +66,6 @@ const severityLabel: Record<Severity, string> = {
   standard: "Standard review",
   noise: "Low signal",
 };
-
-const draftFailureCopy = {
-  "anchor-not-found": "That diff line is no longer rendered. Scroll it into view and try again.",
-  "composer-not-found": "I found the line, but GitHub’s inline composer did not open.",
-  "range-not-supported": "Range drafting needs one more live GitHub check. Select a single line for now.",
-  "stale-anchor": "The pull request head changed. Refresh the anchor before drafting.",
-  "invalid-request": "The draft was empty or invalid.",
-} as const;
 
 function getInitialContext(): GitHubPageContext {
   const preview = new URLSearchParams(window.location.search).get("preview");
@@ -159,7 +163,175 @@ function ContextLauncher({ context }: { context: GitHubPageContext }) {
   );
 }
 
-function ReviewConversation({ context, plan }: { context: GitHubPageContext; plan?: ReviewPlan | undefined }) {
+function LiveReview({ context }: { context: GitHubPageContext }) {
+  const client = useMemo(() => new HarnessClient(harnessConfig), []);
+  const sourceRef = useRef<EventSource | undefined>(undefined);
+  const [session, setSession] = useState<HarnessSession>();
+  const [phase, setPhase] = useState<"idle" | "starting" | "generating">("idle");
+  const [generationProgress, setGenerationProgress] = useState({ completed: 0, total: 0 });
+  const [error, setError] = useState<string>();
+  const demoIdentityMatches = context.owner === import.meta.env.VITE_DEMO_OWNER
+    && context.repository === import.meta.env.VITE_DEMO_REPO
+    && context.pullNumber === Number(import.meta.env.VITE_DEMO_PR ?? "123");
+  const headSha = context.headSha
+    ?? context.activeAnchor?.headSha
+    ?? (demoIdentityMatches ? import.meta.env.VITE_DEMO_HEAD_SHA : undefined);
+  const reviewIdentity = `${context.owner}/${context.repository}#${context.pullNumber}:${headSha ?? "unknown"}`;
+
+  useEffect(() => {
+    sourceRef.current?.close();
+    sourceRef.current = undefined;
+    setSession(undefined);
+    setPhase("idle");
+    setGenerationProgress({ completed: 0, total: 0 });
+    setError(undefined);
+  }, [reviewIdentity]);
+
+  useEffect(() => () => sourceRef.current?.close(), []);
+
+  const connectToStream = (nextSession: HarnessSession) => {
+    sourceRef.current?.close();
+    setPhase("generating");
+    let settled = false;
+    const source = new EventSource(client.eventsUrl(nextSession.id));
+    sourceRef.current = source;
+
+    const handle = (raw: MessageEvent<string>) => {
+      try {
+        const parsed = StoryStreamEventSchema.parse(JSON.parse(raw.data));
+        if (parsed.type === "story.skeleton") {
+          setGenerationProgress({ completed: 0, total: parsed.data.chapters.length });
+          setSession((current) => current ? {
+            ...current,
+            status: "GENERATING",
+            skeleton: parsed.data,
+          } : current);
+        }
+        if (parsed.type === "story.chapter") {
+          setGenerationProgress((current) => ({
+            completed: Math.min(current.completed + 1, current.total || current.completed + 1),
+            total: current.total || current.completed + 1,
+          }));
+        }
+        if (parsed.type === "story.ready") {
+          settled = true;
+          source.close();
+          setSession((current) => {
+            if (!current) return current;
+            const { error: _error, ...rest } = current;
+            return { ...rest, status: "READY", artifact: parsed.data };
+          });
+          setPhase("idle");
+        }
+        if (parsed.type === "story.error") {
+          settled = true;
+          source.close();
+          setError(parsed.data.message);
+          setPhase("idle");
+        }
+      } catch (streamError) {
+        settled = true;
+        source.close();
+        setError(streamError instanceof Error ? streamError.message : "Invalid story event");
+        setPhase("idle");
+      }
+    };
+
+    for (const eventName of ["story.skeleton", "story.chapter", "story.ready", "story.error"]) {
+      source.addEventListener(eventName, handle as EventListener);
+    }
+    source.onerror = () => {
+      if (settled) return;
+      source.close();
+      setError(`Could not reach the review harness at ${harnessConfig.apiBaseUrl}.`);
+      setPhase("idle");
+    };
+  };
+
+  const startReview = async () => {
+    if (!context.owner || !context.repository || !context.pullNumber || !headSha) return;
+    sourceRef.current?.close();
+    setError(undefined);
+    setPhase("starting");
+    try {
+      const nextSession = await client.createOrResume({
+        owner: context.owner,
+        repo: context.repository,
+        pullNumber: context.pullNumber,
+        headSha,
+      });
+      if (nextSession.artifact) {
+        const artifact = StoryArtifactSchema.parse(nextSession.artifact);
+        setSession({ ...nextSession, artifact });
+        setPhase("idle");
+        return;
+      }
+      setSession(nextSession);
+      connectToStream(nextSession);
+    } catch (startError) {
+      setError(startError instanceof Error ? startError.message : "Could not start the review");
+      setPhase("idle");
+    }
+  };
+
+  const plan = useMemo(() => session?.artifact
+    ? storyArtifactToReviewPlan(
+      session.artifact,
+      `${context.owner}/${context.repository}`,
+      session.completedChapterIds,
+    )
+    : undefined, [context.owner, context.repository, session?.artifact, session?.completedChapterIds]);
+
+  if (session?.artifact && plan) {
+    return (
+      <ReviewConversation
+        context={context}
+        plan={plan}
+        session={session}
+        client={client}
+        onSessionChange={setSession}
+      />
+    );
+  }
+
+  const busy = phase !== "idle";
+  return (
+    <div className="review-start">
+      <div className="launcher-mark">
+        {busy ? <LoaderCircle className="spin" size={23} /> : <Sparkles size={23} strokeWidth={1.6} />}
+      </div>
+      <p className="utility-label">{context.owner}/{context.repository} · #{context.pullNumber}</p>
+      <h1>{phase === "generating" ? "Building your review story…" : "Review the latest commit."}</h1>
+      <p className="launcher-copy">
+        {phase === "generating"
+          ? `${generationProgress.completed} of ${generationProgress.total || "…"} chapters ready. Keep this panel open while Primer connects the evidence.`
+          : "Primer will analyze the current PR head, then guide you through an evidence-backed chapter at a time."}
+      </p>
+      {headSha ? <code className="commit-pill">{headSha.slice(0, 12)}</code> : (
+        <p className="start-warning">Open the Files changed tab so Primer can read the current head commit.</p>
+      )}
+      {error ? <div className="start-error" role="alert"><AlertCircle size={14} /> {error}</div> : null}
+      <button className="primary-action start-button" type="button" disabled={!headSha || busy} onClick={() => void startReview()}>
+        {busy ? "Starting review…" : session?.status === "FAILED" || error ? "Retry review" : "Start review for latest commit"}
+        {busy ? <LoaderCircle className="spin" size={15} /> : <ArrowRight size={15} />}
+      </button>
+    </div>
+  );
+}
+
+function ReviewConversation({
+  context,
+  plan,
+  session,
+  client,
+  onSessionChange,
+}: {
+  context: GitHubPageContext;
+  plan: ReviewPlan;
+  session: HarnessSession;
+  client: HarnessClient;
+  onSessionChange: (session: HarnessSession) => void;
+}) {
   const repo = `${context.owner}/${context.repository}`;
   const activeFileName = context.activeFile?.split("/").at(-1);
   const anchor = context.activeAnchor;
@@ -168,28 +340,29 @@ function ReviewConversation({ context, plan }: { context: GitHubPageContext; pla
       ? `lines ${anchor.startLine}–${anchor.line}`
       : `line ${anchor.line}`}`
     : undefined;
-  const route = useMemo(() => plan ? getExtensionReviewRoute(plan) : [], [plan]);
+  const route = useMemo(() => getExtensionReviewRoute(plan), [plan]);
   const [selectedIndex, setSelectedIndex] = useState(() => {
+    const currentChapterIndex = route.findIndex(({ chapter }) => chapter.id === session.currentChapterId);
+    if (currentChapterIndex >= 0) return currentChapterIndex;
     const visibleIndex = findRouteIndexByPath(route, context.activeFile);
     return visibleIndex >= 0 ? visibleIndex : 0;
   });
-  const [statuses, setStatuses] = useState<Record<string, ReviewStepStatus>>(() =>
-    Object.fromEntries(route.map(({ step }) => [step.fileId, step.status])),
-  );
   const [composerValue, setComposerValue] = useState("");
+  const [pendingDraft, setPendingDraft] = useState<HarnessDraft>();
   const [draftFeedback, setDraftFeedback] = useState<{
     tone: "working" | "success" | "error";
     message: string;
   }>();
   const selected = route[selectedIndex];
-  const selectedStatus = selected ? statuses[selected.step.fileId] ?? selected.step.status : "pending";
+  const selectedStatus: ReviewStepStatus = selected && session.completedChapterIds.includes(selected.chapter.id)
+    ? "reviewed"
+    : "pending";
   const severity = selected?.file.severity ?? "standard";
-  const chapterNumber = selected && plan ? plan.chapters.indexOf(selected.chapter) + 1 : 0;
+  const chapterNumber = selected ? plan.chapters.indexOf(selected.chapter) + 1 : 0;
 
   useEffect(() => {
     const visibleIndex = findRouteIndexByPath(route, context.activeFile);
     setSelectedIndex(visibleIndex >= 0 ? visibleIndex : 0);
-    setStatuses(Object.fromEntries(route.map(({ step }) => [step.fileId, step.status])));
   }, [plan, route]);
 
   useEffect(() => {
@@ -197,10 +370,18 @@ function ReviewConversation({ context, plan }: { context: GitHubPageContext; pla
     if (visibleIndex >= 0) setSelectedIndex(visibleIndex);
   }, [context.activeFile, route]);
 
-  const navigateTo = (index: number) => {
+  const navigateTo = async (index: number) => {
     const next = route[index];
     if (!next) return;
     setSelectedIndex(index);
+    try {
+      onSessionChange(await client.selectChapter(session.id, next.chapter.id));
+    } catch (navigationError) {
+      setDraftFeedback({
+        tone: "error",
+        message: navigationError instanceof Error ? navigationError.message : "Could not save review position",
+      });
+    }
     if (new URLSearchParams(window.location.search).has("preview")) return;
     void browser.tabs.query({ active: true, currentWindow: true }).then(([tab]) => {
       if (tab?.id !== undefined) {
@@ -210,21 +391,34 @@ function ReviewConversation({ context, plan }: { context: GitHubPageContext; pla
     }).catch(() => undefined);
   };
 
-  const toggleReviewed = () => {
-    if (!selected) return;
-    setStatuses((current) => ({
-      ...current,
-      [selected.step.fileId]: selectedStatus === "reviewed" ? "pending" : "reviewed",
-    }));
+  const completeSelected = async () => {
+    if (!selected || selectedStatus === "reviewed") return;
+    try {
+      onSessionChange(await client.completeChapter(session.id, selected.chapter.id));
+    } catch (completionError) {
+      setDraftFeedback({
+        tone: "error",
+        message: completionError instanceof Error ? completionError.message : "Could not complete this chapter",
+      });
+    }
   };
 
   const submitComposer = async () => {
     const command = parseCommentCommand(composerValue);
     if (!command) {
-      setDraftFeedback({
-        tone: "error",
-        message: "Live conversation is not connected yet. Use /comment to prepare a GitHub draft.",
-      });
+      if (!composerValue.trim()) return;
+      setDraftFeedback({ tone: "working", message: "Primer is checking the stored evidence…" });
+      try {
+        await client.sendChatMessage(session.id, composerValue.trim());
+        onSessionChange(await client.getSession(session.id));
+        setComposerValue("");
+        setDraftFeedback(undefined);
+      } catch (chatError) {
+        setDraftFeedback({
+          tone: "error",
+          message: chatError instanceof Error ? chatError.message : "Chat is unavailable",
+        });
+      }
       return;
     }
     if (!anchor) {
@@ -237,38 +431,44 @@ function ReviewConversation({ context, plan }: { context: GitHubPageContext; pla
 
     const reviewReason = selected?.file.path === anchor.path ? selected.step.reason : undefined;
     const body = createFallbackCommentDraft(command.instruction, reviewReason);
-    setDraftFeedback({ tone: "working", message: "Opening GitHub’s native composer…" });
-
-    if (new URLSearchParams(window.location.search).has("preview")) {
-      setDraftFeedback({
-        tone: "success",
-        message: "Preview: draft prepared. In the extension, GitHub opens it for your review.",
-      });
-      return;
-    }
+    setDraftFeedback({ tone: "working", message: "Saving a private review draft…" });
 
     try {
-      const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
-      if (tab?.id === undefined) throw new Error("No active tab");
-      const result: unknown = await browser.tabs.sendMessage(tab.id, {
-        type: "primer:draft-comment",
-        anchor,
+      const draft = await client.createDraft(session.id, {
         body,
+        path: anchor.path,
+        line: anchor.line,
+        side: anchor.side,
       });
-      if (!isCommentDraftResult(result)) throw new Error("Invalid drafting response");
-      if (!result.ok) {
-        setDraftFeedback({ tone: "error", message: draftFailureCopy[result.error] });
-        return;
-      }
+      setPendingDraft(draft);
       setComposerValue("");
       setDraftFeedback({
         tone: "success",
-        message: "Draft ready in GitHub. Edit, cancel, or submit it there.",
+        message: "Draft saved privately. Confirm below before Primer publishes it to the pending review.",
       });
-    } catch {
+    } catch (draftError) {
       setDraftFeedback({
         tone: "error",
-        message: "Primer could not reach the active GitHub diff. Return to the PR and try again.",
+        message: draftError instanceof Error ? draftError.message : "Could not save the draft",
+      });
+    }
+  };
+
+  const publishDraft = async () => {
+    if (!pendingDraft) return;
+    setDraftFeedback({ tone: "working", message: "Publishing to your pending GitHub review…" });
+    try {
+      const published = await client.publishDraft(session.id, pendingDraft.id);
+      setPendingDraft(undefined);
+      onSessionChange(await client.getSession(session.id));
+      setDraftFeedback({
+        tone: "success",
+        message: published.githubCommentUrl ? "Comment published to the pending review." : "Comment published.",
+      });
+    } catch (publishError) {
+      setDraftFeedback({
+        tone: "error",
+        message: publishError instanceof Error ? publishError.message : "Could not publish the draft",
       });
     }
   };
@@ -284,9 +484,7 @@ function ReviewConversation({ context, plan }: { context: GitHubPageContext; pla
             <h1>I’m ready to guide this review.</h1>
             <p>
               I found <strong>{repo}#{context.pullNumber}</strong>.
-              {plan
-                ? ` I loaded ${route.length} evidence-backed steps across ${plan.chapters.length} chapters and will follow the diff as you scroll.`
-                : " I’ll follow the diff as you scroll and keep the review tied to the visible code."}
+              {` I loaded ${route.length} evidence-backed steps across ${plan.chapters.length} chapters and will follow the diff as you scroll.`}
             </p>
           </div>
         </article>
@@ -335,24 +533,43 @@ function ReviewConversation({ context, plan }: { context: GitHubPageContext; pla
           </section>
         ) : null}
 
+        {session.chatTurns.filter(({ role }) => role !== "tool").map((turn) => (
+          <article className={`chat-turn chat-${turn.role}`} key={turn.id}>
+            <span>{turn.role === "assistant" ? "Primer" : "You"}</span>
+            <p>{turn.content}</p>
+            {turn.citations.length > 0 ? (
+              <div className="chat-citations">
+                {turn.citations.map((citation) => (
+                  <code key={`${citation.path}:${citation.lines.join("-")}`}>
+                    {citation.path}:{citation.lines[0]}–{citation.lines[1]}
+                  </code>
+                ))}
+              </div>
+            ) : null}
+          </article>
+        ))}
+
         <div className="suggestions" aria-label="Suggested prompts">
-          <button type="button">Explain the intent of this PR</button>
-          <button type="button">Show the highest-risk decision</button>
-          <button type="button">/evidence for this file</button>
+          {["Explain the intent of this PR", "Show the highest-risk decision", "/evidence for this file"].map((prompt) => (
+            <button type="button" key={prompt} onClick={() => setComposerValue(prompt)}>{prompt}</button>
+          ))}
         </div>
       </div>
 
       <footer className="composer-shell">
         <div className="review-controls" aria-label="Review navigation">
-          <button className="control-button" type="button" aria-label="Previous review step" disabled={selectedIndex <= 0} onClick={() => navigateTo(selectedIndex - 1)}><ArrowLeft size={15} /></button>
+          <button className="control-button" type="button" aria-label="Previous review step" disabled={selectedIndex <= 0} onClick={() => void navigateTo(selectedIndex - 1)}><ArrowLeft size={15} /></button>
           <span className={`severity severity-${severity}`}><CircleDot size={13} /> {severityLabel[severity]}</span>
-          <button className={`control-button status-control ${selectedStatus === "reviewed" ? "is-reviewed" : ""}`} type="button" aria-label={selectedStatus === "reviewed" ? "Mark pending" : "Mark reviewed"} disabled={!selected} onClick={toggleReviewed}><CheckCircle2 size={15} /></button>
-          <button className="control-button" type="button" aria-label="Next review step" disabled={selectedIndex >= route.length - 1} onClick={() => navigateTo(selectedIndex + 1)}><ArrowRight size={15} /></button>
+          <button className={`control-button status-control ${selectedStatus === "reviewed" ? "is-reviewed" : ""}`} type="button" aria-label={selectedStatus === "reviewed" ? "Chapter reviewed" : "Mark chapter reviewed"} disabled={!selected || selectedStatus === "reviewed"} onClick={() => void completeSelected()}><CheckCircle2 size={15} /></button>
+          <button className="control-button" type="button" aria-label="Next review step" disabled={selectedIndex >= route.length - 1} onClick={() => void navigateTo(selectedIndex + 1)}><ArrowRight size={15} /></button>
         </div>
         {draftFeedback ? (
           <div className={`draft-feedback is-${draftFeedback.tone}`} role="status">
             {draftFeedback.tone === "success" ? <CheckCircle2 size={13} /> : <AlertCircle size={13} />}
             <span>{draftFeedback.message}</span>
+            {pendingDraft && draftFeedback.tone === "success" ? (
+              <button className="publish-draft" type="button" onClick={() => void publishDraft()}>Confirm publish</button>
+            ) : null}
           </div>
         ) : null}
         <form className="composer" onSubmit={(event) => {
@@ -381,7 +598,6 @@ function ReviewConversation({ context, plan }: { context: GitHubPageContext; pla
 
 export function App() {
   const [context, setContext] = useState<GitHubPageContext>(getInitialContext);
-  const plan = useMemo(() => getReviewPlanForContext(context), [context]);
   const identity = useMemo(() => context.kind === "pull-request"
     ? `${context.owner}/${context.repository} · #${context.pullNumber}`
     : "Review companion", [context]);
@@ -430,7 +646,7 @@ export function App() {
         </header>
 
         {context.kind === "pull-request"
-          ? <ReviewConversation context={context} plan={plan} />
+          ? <LiveReview context={context} />
           : <ContextLauncher context={context} />}
       </main>
     </Tooltip.Provider>
