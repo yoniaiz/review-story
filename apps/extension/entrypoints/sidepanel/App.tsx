@@ -736,8 +736,33 @@ export function App() {
   useEffect(() => {
     if (new URLSearchParams(window.location.search).has("preview")) return undefined;
 
-    void browser.runtime.sendMessage({ type: "primer:get-active-context" }).then((next) => {
-      if (next && typeof next === "object" && "kind" in next) setContext(next as GitHubPageContext);
+    const contextFromActiveTab = async (): Promise<GitHubPageContext | undefined> => {
+      const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+      return tab?.url ? getPageContext(tab.url) : undefined;
+    };
+
+    // Prefer the content-script response because it includes the visible file,
+    // anchor, and head SHA. Query the tab directly as an independent fallback:
+    // PR detection should not disappear just because a dev service worker or
+    // content script was invalidated during an extension reload.
+    void Promise.allSettled([
+      browser.runtime.sendMessage({ type: "primer:get-active-context" }),
+      contextFromActiveTab(),
+    ]).then(([runtimeResult, tabResult]) => {
+      const runtimeContext = runtimeResult.status === "fulfilled"
+        && runtimeResult.value
+        && typeof runtimeResult.value === "object"
+        && "kind" in runtimeResult.value
+        ? runtimeResult.value as GitHubPageContext
+        : undefined;
+      const tabContext = tabResult.status === "fulfilled" ? tabResult.value : undefined;
+      setContext(
+        runtimeContext?.kind === "pull-request"
+          ? runtimeContext
+          : tabContext?.kind === "pull-request"
+            ? tabContext
+            : runtimeContext ?? tabContext ?? getPageContext(""),
+      );
     });
 
     const listener = (message: unknown) => {
@@ -747,7 +772,23 @@ export function App() {
       return undefined;
     };
     browser.runtime.onMessage.addListener(listener);
-    return () => browser.runtime.onMessage.removeListener(listener);
+
+    const onActivated = ({ tabId }: { tabId: number }) => {
+      void browser.tabs.get(tabId).then((tab) => {
+        if (tab.url) setContext(getPageContext(tab.url));
+      }).catch(() => undefined);
+    };
+    const onUpdated = (_tabId: number, change: { url?: string }, tab: { active: boolean }) => {
+      if (tab.active && change.url) setContext(getPageContext(change.url));
+    };
+    browser.tabs.onActivated.addListener(onActivated);
+    browser.tabs.onUpdated.addListener(onUpdated);
+
+    return () => {
+      browser.runtime.onMessage.removeListener(listener);
+      browser.tabs.onActivated.removeListener(onActivated);
+      browser.tabs.onUpdated.removeListener(onUpdated);
+    };
   }, []);
 
   return (

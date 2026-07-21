@@ -2,6 +2,16 @@ import { defineConfig } from "wxt";
 
 export default defineConfig({
   modules: ["@wxt-dev/module-react"],
+  // WXT's development manifest registers content scripts at runtime through
+  // this server. If a second dev process silently chooses another port, an
+  // already-loaded extension can keep the old worker and stop receiving page
+  // context. Fail the duplicate process instead of creating a stale runtime.
+  dev: {
+    server: {
+      port: 3001,
+      strictPort: true,
+    },
+  },
   vite: () => ({
     envDir: "../..",
   }),
