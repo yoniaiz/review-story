@@ -265,8 +265,8 @@ export async function buildApp(
 
 function createSessionStore(): ReviewSessionStore {
   const url = process.env.SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (url && serviceRoleKey) return new SupabaseReviewSessionStore(url, serviceRoleKey);
+  const secretKey = process.env.SUPABASE_SECRET_KEY ?? process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (url && secretKey) return new SupabaseReviewSessionStore(url, secretKey);
   return new MemoryReviewSessionStore();
 }
 

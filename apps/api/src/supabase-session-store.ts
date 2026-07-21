@@ -20,7 +20,7 @@ interface SessionRow {
 export class SupabaseReviewSessionStore implements ReviewSessionStore {
   constructor(
     private readonly url: string,
-    private readonly serviceRoleKey: string,
+    private readonly secretKey: string,
   ) {}
 
   async findCurrent(input: NewReviewSession): Promise<ReviewSession | undefined> {
@@ -115,7 +115,9 @@ export class SupabaseReviewSessionStore implements ReviewSessionStore {
   async #request<T = unknown>(path: string, init: RequestInit = {}): Promise<T> {
     const response = await fetch(`${this.url.replace(/\/$/, "")}/rest/v1/${path}`, {
       ...init,
-      headers: { apikey: this.serviceRoleKey, Authorization: `Bearer ${this.serviceRoleKey}`, "Content-Type": "application/json", ...(init.headers ?? {}) },
+      // Current `sb_secret_…` keys are opaque rather than JWTs. Supabase
+      // accepts them in `apikey`; using them as Bearer tokens is rejected.
+      headers: { apikey: this.secretKey, "Content-Type": "application/json", ...(init.headers ?? {}) },
     });
     if (!response.ok) throw new Error(`Supabase request failed: ${response.status} ${await response.text()}`);
     if (response.status === 204) return undefined as T;
