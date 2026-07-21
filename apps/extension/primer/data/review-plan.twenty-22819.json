@@ -1,0 +1,813 @@
+{
+  "repo": "twentyhq/twenty",
+  "pr": 22819,
+  "headSha": "7a4dd79fe24cdf0b65e6d27f902f5fdf7affdc4f",
+  "title": "Add weekly layout to record calendar",
+  "stats": {
+    "totalFiles": 158,
+    "noiseFiles": 48,
+    "chapters": 5
+  },
+  "chapters": [
+    {
+      "id": "ch1",
+      "title": "Calendar entry & layout",
+      "summary": "Introduces the weekly calendar route and decides which layout the record view should render.",
+      "entryPoint": "packages/twenty-front/src/modules/object-record/record-calendar/components/RecordCalendar.tsx",
+      "fileIds": [
+        "f-0c0badeea",
+        "f-14e1dc1d9",
+        "f-2f7d1166a",
+        "f-52e3febd5",
+        "f-595d76d33",
+        "f-60bdbd1c1",
+        "f-621adb2b0",
+        "f-628169fce",
+        "f-679e44d31",
+        "f-6fd14f857",
+        "f-702debc01",
+        "f-72e452b60",
+        "f-766836fd4",
+        "f-7bf4b5532",
+        "f-82d55a071",
+        "f-84bd59bc7",
+        "f-93f73e21a",
+        "f-94841bba9",
+        "f-968e3b64e",
+        "f-b997d585f",
+        "f-c2b1a1e1d",
+        "f-c3cb28890",
+        "f-c4aacb63e",
+        "f-c7889dc8a",
+        "f-c9e81ccfc",
+        "f-cb65724ce",
+        "f-d914c9e40",
+        "f-f8f1de072",
+        "f-fc39d9e4e"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": "ch2",
+      "title": "Weekly time grid",
+      "summary": "Builds the seven-day grid and translates calendar records into positioned weekly events.",
+      "entryPoint": "packages/twenty-front/src/modules/object-record/record-calendar/week/components/RecordCalendarWeek.tsx",
+      "fileIds": [
+        "f-03dfe5b3a",
+        "f-0877280c0",
+        "f-250c7d64c",
+        "f-29fbe8bf2",
+        "f-3e97e2a69",
+        "f-3fcf5b43d",
+        "f-4d5128eaa",
+        "f-78b807312",
+        "f-80e3ac3d3",
+        "f-8de6246c1",
+        "f-945d180c2",
+        "f-9e3e14387",
+        "f-d3df9b48f",
+        "f-d7732c2fe",
+        "f-e5316c101",
+        "f-ef68f0a9e"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": "ch3",
+      "title": "Calendar state",
+      "summary": "Coordinates the visible date range, layout preference, and record selection state.",
+      "entryPoint": "packages/twenty-front/src/modules/object-record/record-calendar/week/hooks/useProcessRecordCalendarWeekEventDrop.ts",
+      "fileIds": [
+        "f-01f6242de",
+        "f-4bd8678d8",
+        "f-63c367503"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": "ch4",
+      "title": "Record data & metadata",
+      "summary": "Adapts object metadata and queried records into the shape consumed by the calendar.",
+      "entryPoint": "packages/twenty-front/src/modules/object-record/record-index/hooks/useLoadRecordIndexStates.ts",
+      "fileIds": [
+        "f-284799cb7",
+        "f-45d34f80e",
+        "f-4fbe5dda6",
+        "f-600ba0212",
+        "f-65ddac502",
+        "f-74f0dc7c7",
+        "f-a33e1ada9",
+        "f-c3c8c3cb1",
+        "f-ee35922e4"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": "ch5",
+      "title": "Shared interaction layer",
+      "summary": "Reuses shared fields, menus, and record actions without changing their underlying behavior.",
+      "entryPoint": "packages/twenty-front/src/modules/object-record/record-calendar/record-calendar-card/components/RecordCalendarCard.tsx",
+      "fileIds": [
+        "f-22b14c568",
+        "f-2ccd1e723",
+        "f-926f72169",
+        "f-9d159979e",
+        "f-e7fbd8d13"
+      ],
+      "status": "pending"
+    }
+  ],
+  "files": [
+    {
+      "id": "f-595d76d33",
+      "path": "packages/twenty-front/src/modules/object-record/object-options-dropdown/components/ObjectOptionsDropdownCalendarEndFieldsContent.tsx",
+      "chapterId": "ch1",
+      "severity": "needs-human",
+      "noiseReason": null,
+      "summary": "Changed in the calendar review slice."
+    },
+    {
+      "id": "f-702debc01",
+      "path": "packages/twenty-front/src/modules/object-record/object-options-dropdown/components/ObjectOptionsDropdownCalendarFieldsContent.tsx",
+      "chapterId": "ch1",
+      "severity": "needs-human",
+      "noiseReason": null,
+      "summary": "Changed in the calendar review slice."
+    },
+    {
+      "id": "f-f8f1de072",
+      "path": "packages/twenty-front/src/modules/object-record/object-options-dropdown/components/ObjectOptionsDropdownCalendarViewContent.tsx",
+      "chapterId": "ch1",
+      "severity": "needs-human",
+      "noiseReason": null,
+      "summary": "Changed in the calendar review slice."
+    },
+    {
+      "id": "f-14e1dc1d9",
+      "path": "packages/twenty-front/src/modules/object-record/object-options-dropdown/components/ObjectOptionsDropdownLayoutContent.tsx",
+      "chapterId": "ch1",
+      "severity": "needs-human",
+      "noiseReason": null,
+      "summary": "Changed in the calendar review slice."
+    },
+    {
+      "id": "f-52e3febd5",
+      "path": "packages/twenty-front/src/modules/object-record/object-options-dropdown/hooks/useSetViewTypeFromLayoutOptionsMenu.ts",
+      "chapterId": "ch1",
+      "severity": "needs-human",
+      "noiseReason": null,
+      "summary": "Changed in the calendar review slice."
+    },
+    {
+      "id": "f-7bf4b5532",
+      "path": "packages/twenty-front/src/modules/object-record/record-calendar/components/RecordCalendar.tsx",
+      "chapterId": "ch1",
+      "severity": "needs-human",
+      "noiseReason": null,
+      "summary": "Changed in the calendar review slice."
+    },
+    {
+      "id": "f-82d55a071",
+      "path": "packages/twenty-front/src/modules/object-record/record-calendar/components/RecordCalendarAddNew.tsx",
+      "chapterId": "ch1",
+      "severity": "needs-human",
+      "noiseReason": null,
+      "summary": "Changed in the calendar review slice."
+    },
+    {
+      "id": "f-c2b1a1e1d",
+      "path": "packages/twenty-front/src/modules/object-record/record-calendar/components/RecordCalendarTopBar.tsx",
+      "chapterId": "ch1",
+      "severity": "needs-human",
+      "noiseReason": null,
+      "summary": "Changed in the calendar review slice."
+    },
+    {
+      "id": "f-72e452b60",
+      "path": "packages/twenty-front/src/modules/object-record/record-calendar/constants/RecordCalendarMonthVisibleRecordLimit.ts",
+      "chapterId": "ch1",
+      "severity": "needs-human",
+      "noiseReason": null,
+      "summary": "Changed in the calendar review slice."
+    },
+    {
+      "id": "f-94841bba9",
+      "path": "packages/twenty-front/src/modules/object-record/record-calendar/hooks/useRecordCalendarGroupByRecords.ts",
+      "chapterId": "ch1",
+      "severity": "needs-human",
+      "noiseReason": null,
+      "summary": "Changed in the calendar review slice."
+    },
+    {
+      "id": "f-b997d585f",
+      "path": "packages/twenty-front/src/modules/object-record/record-calendar/month/components/RecordCalendarMonth.tsx",
+      "chapterId": "ch4",
+      "severity": "standard",
+      "noiseReason": null,
+      "summary": "Changed in the calendar review slice."
+    },
+    {
+      "id": "f-c9e81ccfc",
+      "path": "packages/twenty-front/src/modules/object-record/record-calendar/month/components/RecordCalendarMonthBodyDay.tsx",
+      "chapterId": "ch4",
+      "severity": "standard",
+      "noiseReason": null,
+      "summary": "Changed in the calendar review slice."
+    },
+    {
+      "id": "f-fc39d9e4e",
+      "path": "packages/twenty-front/src/modules/object-record/record-calendar/month/hooks/useRecordCalendarMonthDaysRange.tsx",
+      "chapterId": "ch4",
+      "severity": "standard",
+      "noiseReason": null,
+      "summary": "Changed in the calendar review slice."
+    },
+    {
+      "id": "f-766836fd4",
+      "path": "packages/twenty-front/src/modules/object-record/record-calendar/month/hooks/useRecordCalendarQueryDateRangeFilter.tsx",
+      "chapterId": "ch4",
+      "severity": "standard",
+      "noiseReason": null,
+      "summary": "Changed in the calendar review slice."
+    },
+    {
+      "id": "f-621adb2b0",
+      "path": "packages/twenty-front/src/modules/object-record/record-calendar/month/utils/getRecordCalendarDateRangeOverlapFilter.ts",
+      "chapterId": "ch4",
+      "severity": "standard",
+      "noiseReason": null,
+      "summary": "Changed in the calendar review slice."
+    },
+    {
+      "id": "f-e7fbd8d13",
+      "path": "packages/twenty-front/src/modules/object-record/record-calendar/record-calendar-card/components/RecordCalendarCard.tsx",
+      "chapterId": "ch5",
+      "severity": "standard",
+      "noiseReason": null,
+      "summary": "Changed in the calendar review slice."
+    },
+    {
+      "id": "f-2ccd1e723",
+      "path": "packages/twenty-front/src/modules/object-record/record-calendar/record-calendar-card/components/RecordCalendarCardDraggableContainer.tsx",
+      "chapterId": "ch5",
+      "severity": "standard",
+      "noiseReason": null,
+      "summary": "Changed in the calendar review slice."
+    },
+    {
+      "id": "f-22b14c568",
+      "path": "packages/twenty-front/src/modules/object-record/record-calendar/record-calendar-card/components/RecordCalendarCardHeader.tsx",
+      "chapterId": "ch5",
+      "severity": "standard",
+      "noiseReason": null,
+      "summary": "Changed in the calendar review slice."
+    },
+    {
+      "id": "f-9d159979e",
+      "path": "packages/twenty-front/src/modules/object-record/record-calendar/record-calendar-card/hooks/useIsRecordCalendarCardDragDisabled.ts",
+      "chapterId": "ch5",
+      "severity": "standard",
+      "noiseReason": null,
+      "summary": "Changed in the calendar review slice."
+    },
+    {
+      "id": "f-926f72169",
+      "path": "packages/twenty-front/src/modules/object-record/record-calendar/record-calendar-card/utils/getRecordCalendarCardDraggableId.ts",
+      "chapterId": "ch5",
+      "severity": "standard",
+      "noiseReason": null,
+      "summary": "Changed in the calendar review slice."
+    },
+    {
+      "id": "f-60bdbd1c1",
+      "path": "packages/twenty-front/src/modules/object-record/record-calendar/states/selectors/calendarDayRecordsComponentFamilySelector.ts",
+      "chapterId": "ch1",
+      "severity": "needs-human",
+      "noiseReason": null,
+      "summary": "Changed in the calendar review slice."
+    },
+    {
+      "id": "f-93f73e21a",
+      "path": "packages/twenty-front/src/modules/object-record/record-calendar/utils/getEffectiveRecordCalendarEndFieldMetadataId.ts",
+      "chapterId": "ch1",
+      "severity": "needs-human",
+      "noiseReason": null,
+      "summary": "Changed in the calendar review slice."
+    },
+    {
+      "id": "f-84bd59bc7",
+      "path": "packages/twenty-front/src/modules/object-record/record-calendar/utils/getRecordCalendarDateTimeRange.ts",
+      "chapterId": "ch1",
+      "severity": "needs-human",
+      "noiseReason": null,
+      "summary": "Changed in the calendar review slice."
+    },
+    {
+      "id": "f-6fd14f857",
+      "path": "packages/twenty-front/src/modules/object-record/record-calendar/utils/getSupportedRecordCalendarLayout.ts",
+      "chapterId": "ch1",
+      "severity": "needs-human",
+      "noiseReason": null,
+      "summary": "Changed in the calendar review slice."
+    },
+    {
+      "id": "f-0c0badeea",
+      "path": "packages/twenty-front/src/modules/object-record/record-calendar/utils/isRecordCalendarDayInDateRange.ts",
+      "chapterId": "ch1",
+      "severity": "needs-human",
+      "noiseReason": null,
+      "summary": "Changed in the calendar review slice."
+    },
+    {
+      "id": "f-679e44d31",
+      "path": "packages/twenty-front/src/modules/object-record/record-calendar/utils/isRecordCalendarDayInDateTimeRange.ts",
+      "chapterId": "ch1",
+      "severity": "needs-human",
+      "noiseReason": null,
+      "summary": "Changed in the calendar review slice."
+    },
+    {
+      "id": "f-d7732c2fe",
+      "path": "packages/twenty-front/src/modules/object-record/record-calendar/week/components/RecordCalendarWeek.tsx",
+      "chapterId": "ch2",
+      "severity": "needs-human",
+      "noiseReason": null,
+      "summary": "Changed in the calendar review slice."
+    },
+    {
+      "id": "f-d3df9b48f",
+      "path": "packages/twenty-front/src/modules/object-record/record-calendar/week/components/RecordCalendarWeekDragDropContext.tsx",
+      "chapterId": "ch2",
+      "severity": "needs-human",
+      "noiseReason": null,
+      "summary": "Changed in the calendar review slice."
+    },
+    {
+      "id": "f-e5316c101",
+      "path": "packages/twenty-front/src/modules/object-record/record-calendar/week/components/RecordCalendarWeekEvent.tsx",
+      "chapterId": "ch2",
+      "severity": "needs-human",
+      "noiseReason": null,
+      "summary": "Changed in the calendar review slice."
+    },
+    {
+      "id": "f-9e3e14387",
+      "path": "packages/twenty-front/src/modules/object-record/record-calendar/week/constants/RecordCalendarWeekDimensions.ts",
+      "chapterId": "ch2",
+      "severity": "needs-human",
+      "noiseReason": null,
+      "summary": "Changed in the calendar review slice."
+    },
+    {
+      "id": "f-3fcf5b43d",
+      "path": "packages/twenty-front/src/modules/object-record/record-calendar/week/hooks/useProcessRecordCalendarWeekEventDrop.ts",
+      "chapterId": "ch2",
+      "severity": "needs-human",
+      "noiseReason": null,
+      "summary": "Changed in the calendar review slice."
+    },
+    {
+      "id": "f-03dfe5b3a",
+      "path": "packages/twenty-front/src/modules/object-record/record-calendar/week/hooks/useRecordCalendarWeekDaysRange.ts",
+      "chapterId": "ch2",
+      "severity": "needs-human",
+      "noiseReason": null,
+      "summary": "Changed in the calendar review slice."
+    },
+    {
+      "id": "f-ef68f0a9e",
+      "path": "packages/twenty-front/src/modules/object-record/record-calendar/week/types/RecordCalendarWeekDndData.ts",
+      "chapterId": "ch2",
+      "severity": "needs-human",
+      "noiseReason": null,
+      "summary": "Changed in the calendar review slice."
+    },
+    {
+      "id": "f-0877280c0",
+      "path": "packages/twenty-front/src/modules/object-record/record-calendar/week/utils/computeRecordCalendarWeekEventLayouts.ts",
+      "chapterId": "ch2",
+      "severity": "needs-human",
+      "noiseReason": null,
+      "summary": "Changed in the calendar review slice."
+    },
+    {
+      "id": "f-250c7d64c",
+      "path": "packages/twenty-front/src/modules/object-record/record-calendar/week/utils/formatRecordCalendarWeekEventTimes.ts",
+      "chapterId": "ch2",
+      "severity": "needs-human",
+      "noiseReason": null,
+      "summary": "Changed in the calendar review slice."
+    },
+    {
+      "id": "f-78b807312",
+      "path": "packages/twenty-front/src/modules/object-record/record-calendar/week/utils/formatRecordCalendarWeekRange.ts",
+      "chapterId": "ch2",
+      "severity": "needs-human",
+      "noiseReason": null,
+      "summary": "Changed in the calendar review slice."
+    },
+    {
+      "id": "f-29fbe8bf2",
+      "path": "packages/twenty-front/src/modules/object-record/record-calendar/week/utils/getRecordCalendarWeekEventDropDateTime.ts",
+      "chapterId": "ch2",
+      "severity": "needs-human",
+      "noiseReason": null,
+      "summary": "Changed in the calendar review slice."
+    },
+    {
+      "id": "f-8de6246c1",
+      "path": "packages/twenty-front/src/modules/object-record/record-calendar/week/utils/getRecordCalendarWeekEventHorizontalPosition.ts",
+      "chapterId": "ch2",
+      "severity": "needs-human",
+      "noiseReason": null,
+      "summary": "Changed in the calendar review slice."
+    },
+    {
+      "id": "f-4d5128eaa",
+      "path": "packages/twenty-front/src/modules/object-record/record-calendar/week/utils/getRecordCalendarWeekSlotIndex.ts",
+      "chapterId": "ch2",
+      "severity": "needs-human",
+      "noiseReason": null,
+      "summary": "Changed in the calendar review slice."
+    },
+    {
+      "id": "f-3e97e2a69",
+      "path": "packages/twenty-front/src/modules/object-record/record-calendar/week/utils/getRecordCalendarWeekTimedEventMetrics.ts",
+      "chapterId": "ch2",
+      "severity": "needs-human",
+      "noiseReason": null,
+      "summary": "Changed in the calendar review slice."
+    },
+    {
+      "id": "f-80e3ac3d3",
+      "path": "packages/twenty-front/src/modules/object-record/record-calendar/week/utils/resolveRecordCalendarWeekEventDrop.ts",
+      "chapterId": "ch2",
+      "severity": "needs-human",
+      "noiseReason": null,
+      "summary": "Changed in the calendar review slice."
+    },
+    {
+      "id": "f-945d180c2",
+      "path": "packages/twenty-front/src/modules/object-record/record-calendar/week/utils/updateRecordCalendarWeekActiveSlot.ts",
+      "chapterId": "ch2",
+      "severity": "needs-human",
+      "noiseReason": null,
+      "summary": "Changed in the calendar review slice."
+    },
+    {
+      "id": "f-01f6242de",
+      "path": "packages/twenty-front/src/modules/object-record/record-drag/hooks/useProcessCalendarCardDrop.ts",
+      "chapterId": "ch3",
+      "severity": "needs-human",
+      "noiseReason": null,
+      "summary": "Changed in the calendar review slice."
+    },
+    {
+      "id": "f-4bd8678d8",
+      "path": "packages/twenty-front/src/modules/object-record/record-drag/utils/getShiftedRecordCalendarDateTime.ts",
+      "chapterId": "ch3",
+      "severity": "needs-human",
+      "noiseReason": null,
+      "summary": "Changed in the calendar review slice."
+    },
+    {
+      "id": "f-63c367503",
+      "path": "packages/twenty-front/src/modules/object-record/record-drag/utils/getShiftedRecordCalendarEndDateTime.ts",
+      "chapterId": "ch3",
+      "severity": "needs-human",
+      "noiseReason": null,
+      "summary": "Changed in the calendar review slice."
+    },
+    {
+      "id": "f-74f0dc7c7",
+      "path": "packages/twenty-front/src/modules/object-record/record-field/hooks/useRelevantRecordsGqlFields.ts",
+      "chapterId": "ch5",
+      "severity": "noise",
+      "noiseReason": null,
+      "summary": "Changed in the calendar review slice."
+    },
+    {
+      "id": "f-ee35922e4",
+      "path": "packages/twenty-front/src/modules/object-record/record-index/components/RecordIndexLoadBaseOnContextStoreEffect.tsx",
+      "chapterId": "ch4",
+      "severity": "standard",
+      "noiseReason": null,
+      "summary": "Changed in the calendar review slice."
+    },
+    {
+      "id": "f-a33e1ada9",
+      "path": "packages/twenty-front/src/modules/object-record/record-index/hooks/useLoadRecordIndexStates.ts",
+      "chapterId": "ch4",
+      "severity": "standard",
+      "noiseReason": null,
+      "summary": "Changed in the calendar review slice."
+    },
+    {
+      "id": "f-c3c8c3cb1",
+      "path": "packages/twenty-front/src/modules/object-record/record-index/hooks/useRecordIndexGroupCommonQueryVariables.ts",
+      "chapterId": "ch4",
+      "severity": "standard",
+      "noiseReason": null,
+      "summary": "Changed in the calendar review slice."
+    },
+    {
+      "id": "f-600ba0212",
+      "path": "packages/twenty-front/src/modules/object-record/record-index/states/recordIndexCalendarEndFieldMetadataIdState.ts",
+      "chapterId": "ch4",
+      "severity": "standard",
+      "noiseReason": null,
+      "summary": "Changed in the calendar review slice."
+    },
+    {
+      "id": "f-2f7d1166a",
+      "path": "packages/twenty-front/src/modules/settings/lab/components/SettingsLabContent.tsx",
+      "chapterId": "ch5",
+      "severity": "noise",
+      "noiseReason": null,
+      "summary": "Changed in the calendar review slice."
+    },
+    {
+      "id": "f-284799cb7",
+      "path": "packages/twenty-front/src/modules/views/hooks/useCreateViewFromCurrentView.ts",
+      "chapterId": "ch4",
+      "severity": "standard",
+      "noiseReason": null,
+      "summary": "Changed in the calendar review slice."
+    },
+    {
+      "id": "f-4fbe5dda6",
+      "path": "packages/twenty-front/src/modules/views/types/GraphQLView.ts",
+      "chapterId": "ch4",
+      "severity": "standard",
+      "noiseReason": null,
+      "summary": "Changed in the calendar review slice."
+    },
+    {
+      "id": "f-45d34f80e",
+      "path": "packages/twenty-front/src/modules/views/types/View.ts",
+      "chapterId": "ch4",
+      "severity": "standard",
+      "noiseReason": null,
+      "summary": "Changed in the calendar review slice."
+    },
+    {
+      "id": "f-65ddac502",
+      "path": "packages/twenty-front/src/modules/views/utils/convertUpdateViewInputToGql.ts",
+      "chapterId": "ch4",
+      "severity": "standard",
+      "noiseReason": null,
+      "summary": "Changed in the calendar review slice."
+    },
+    {
+      "id": "f-c3cb28890",
+      "path": "packages/twenty-front/src/modules/views/view-picker/components/ViewPickerContentCreateMode.tsx",
+      "chapterId": "ch1",
+      "severity": "needs-human",
+      "noiseReason": null,
+      "summary": "Changed in the calendar review slice."
+    },
+    {
+      "id": "f-968e3b64e",
+      "path": "packages/twenty-front/src/modules/views/view-picker/components/ViewPickerContentEffect.tsx",
+      "chapterId": "ch1",
+      "severity": "needs-human",
+      "noiseReason": null,
+      "summary": "Changed in the calendar review slice."
+    },
+    {
+      "id": "f-c4aacb63e",
+      "path": "packages/twenty-front/src/modules/views/view-picker/constants/ViewPickerCalendarEndFieldDropdownId.ts",
+      "chapterId": "ch1",
+      "severity": "needs-human",
+      "noiseReason": null,
+      "summary": "Changed in the calendar review slice."
+    },
+    {
+      "id": "f-628169fce",
+      "path": "packages/twenty-front/src/modules/views/view-picker/hooks/useCloseAndResetViewPicker.ts",
+      "chapterId": "ch1",
+      "severity": "needs-human",
+      "noiseReason": null,
+      "summary": "Changed in the calendar review slice."
+    },
+    {
+      "id": "f-c7889dc8a",
+      "path": "packages/twenty-front/src/modules/views/view-picker/hooks/useCreateViewFromCurrentState.ts",
+      "chapterId": "ch1",
+      "severity": "needs-human",
+      "noiseReason": null,
+      "summary": "Changed in the calendar review slice."
+    },
+    {
+      "id": "f-d914c9e40",
+      "path": "packages/twenty-front/src/modules/views/view-picker/states/viewPickerCalendarEndFieldMetadataIdComponentState.ts",
+      "chapterId": "ch1",
+      "severity": "needs-human",
+      "noiseReason": null,
+      "summary": "Changed in the calendar review slice."
+    },
+    {
+      "id": "f-cb65724ce",
+      "path": "packages/twenty-front/src/modules/views/view-picker/utils/getAvailableCalendarEndFieldMetadataItems.ts",
+      "chapterId": "ch1",
+      "severity": "needs-human",
+      "noiseReason": null,
+      "summary": "Changed in the calendar review slice."
+    }
+  ],
+  "graph": {
+    "nodes": [
+      {
+        "id": "n-321da31b9",
+        "label": "Calendar cards",
+        "chapterId": "ch5",
+        "severity": "standard",
+        "fileIds": [
+          "f-22b14c568",
+          "f-2ccd1e723",
+          "f-926f72169",
+          "f-9d159979e",
+          "f-e7fbd8d13"
+        ],
+        "changed": true
+      },
+      {
+        "id": "n-f089958b2",
+        "label": "Calendar orchestration",
+        "chapterId": "ch1",
+        "severity": "needs-human",
+        "fileIds": [
+          "f-0c0badeea",
+          "f-60bdbd1c1",
+          "f-621adb2b0",
+          "f-679e44d31",
+          "f-6fd14f857",
+          "f-72e452b60",
+          "f-766836fd4",
+          "f-7bf4b5532",
+          "f-82d55a071",
+          "f-84bd59bc7",
+          "f-93f73e21a",
+          "f-94841bba9",
+          "f-b997d585f",
+          "f-c2b1a1e1d",
+          "f-c9e81ccfc",
+          "f-fc39d9e4e"
+        ],
+        "changed": true
+      },
+      {
+        "id": "n-90481de79",
+        "label": "Layout configuration",
+        "chapterId": "ch1",
+        "severity": "needs-human",
+        "fileIds": [
+          "f-14e1dc1d9",
+          "f-2f7d1166a",
+          "f-52e3febd5",
+          "f-595d76d33",
+          "f-628169fce",
+          "f-702debc01",
+          "f-968e3b64e",
+          "f-c3cb28890",
+          "f-c4aacb63e",
+          "f-c7889dc8a",
+          "f-cb65724ce",
+          "f-d914c9e40",
+          "f-f8f1de072"
+        ],
+        "changed": true
+      },
+      {
+        "id": "n-eefbd4945",
+        "label": "Record drag & drop",
+        "chapterId": "ch3",
+        "severity": "needs-human",
+        "fileIds": [
+          "f-01f6242de",
+          "f-4bd8678d8",
+          "f-63c367503"
+        ],
+        "changed": true
+      },
+      {
+        "id": "n-90b083d47",
+        "label": "Supporting modules",
+        "chapterId": "ch5",
+        "severity": "noise",
+        "fileIds": [],
+        "changed": false
+      },
+      {
+        "id": "n-ea42103d2",
+        "label": "View state & data",
+        "chapterId": "ch4",
+        "severity": "standard",
+        "fileIds": [
+          "f-284799cb7",
+          "f-45d34f80e",
+          "f-4fbe5dda6",
+          "f-600ba0212",
+          "f-65ddac502",
+          "f-74f0dc7c7",
+          "f-a33e1ada9",
+          "f-c3c8c3cb1",
+          "f-ee35922e4"
+        ],
+        "changed": true
+      },
+      {
+        "id": "n-07cd81d19",
+        "label": "Week interactions",
+        "chapterId": "ch2",
+        "severity": "needs-human",
+        "fileIds": [
+          "f-03dfe5b3a",
+          "f-0877280c0",
+          "f-250c7d64c",
+          "f-29fbe8bf2",
+          "f-3e97e2a69",
+          "f-3fcf5b43d",
+          "f-4d5128eaa",
+          "f-78b807312",
+          "f-80e3ac3d3",
+          "f-8de6246c1",
+          "f-945d180c2",
+          "f-ef68f0a9e"
+        ],
+        "changed": true
+      },
+      {
+        "id": "n-e0336c8fa",
+        "label": "Weekly layout",
+        "chapterId": "ch2",
+        "severity": "needs-human",
+        "fileIds": [
+          "f-9e3e14387",
+          "f-d3df9b48f",
+          "f-d7732c2fe",
+          "f-e5316c101"
+        ],
+        "changed": true
+      }
+    ],
+    "edges": [
+      {
+        "source": "n-07cd81d19",
+        "target": "n-90b083d47",
+        "kind": "imports"
+      },
+      {
+        "source": "n-321da31b9",
+        "target": "n-90b083d47",
+        "kind": "imports"
+      },
+      {
+        "source": "n-90481de79",
+        "target": "n-90b083d47",
+        "kind": "imports"
+      },
+      {
+        "source": "n-90481de79",
+        "target": "n-ea42103d2",
+        "kind": "imports"
+      },
+      {
+        "source": "n-e0336c8fa",
+        "target": "n-07cd81d19",
+        "kind": "imports"
+      },
+      {
+        "source": "n-e0336c8fa",
+        "target": "n-90b083d47",
+        "kind": "imports"
+      },
+      {
+        "source": "n-e0336c8fa",
+        "target": "n-f089958b2",
+        "kind": "imports"
+      },
+      {
+        "source": "n-ea42103d2",
+        "target": "n-90b083d47",
+        "kind": "imports"
+      },
+      {
+        "source": "n-eefbd4945",
+        "target": "n-90b083d47",
+        "kind": "imports"
+      },
+      {
+        "source": "n-f089958b2",
+        "target": "n-90b083d47",
+        "kind": "imports"
+      },
+      {
+        "source": "n-f089958b2",
+        "target": "n-ea42103d2",
+        "kind": "imports"
+      }
+    ]
+  }
+}
+

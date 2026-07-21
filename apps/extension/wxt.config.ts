@@ -6,21 +6,15 @@ export default defineConfig({
     envDir: "../..",
   }),
   manifest: {
-    name: "Review Story",
-    description: "A guided reading order for GitHub pull requests.",
-    minimum_chrome_version: "114",
-    permissions: ["tabs"],
+    name: "Primer Review Story",
+    description: "An evidence-backed AI review companion for GitHub pull requests.",
+    minimum_chrome_version: "116",
+    permissions: ["tabs", "storage"],
     host_permissions: [
       "https://github.com/*",
-      "http://127.0.0.1:8787/*",
-      "http://localhost:8787/*",
     ],
     action: {
-      default_title: "Open Review Story",
-    },
-    content_security_policy: {
-      extension_pages:
-        "script-src 'self'; object-src 'self'; connect-src 'self' http://127.0.0.1:8787 http://localhost:8787",
+      default_title: "Open Primer",
     },
   },
 });

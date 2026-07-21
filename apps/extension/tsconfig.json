@@ -8,8 +8,10 @@
     ".wxt/wxt.d.ts",
     "entrypoints/**/*.ts",
     "entrypoints/**/*.tsx",
+    "primer/**/*.ts",
+    "primer/**/*.tsx",
+    "primer/**/*.json",
     "wxt.config.ts",
     "env.d.ts"
   ]
 }
-

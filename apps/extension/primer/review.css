@@ -1,0 +1,323 @@
+.review-story-root {
+  --review-paper: #f3f1ec;
+  --review-panel: #fbfaf7;
+  --review-ink: #171815;
+  --review-muted: #737267;
+  --review-line: #d8d3c8;
+  --review-accent: #d95c3f;
+  --review-accent-soft: #f8e5de;
+  min-height: 100vh;
+  background: var(--review-paper);
+  color: var(--review-ink);
+}
+
+.review-demo-selector {
+  position: fixed;
+  z-index: 50;
+  right: 18px;
+  bottom: 18px;
+  width: min(330px, calc(100vw - 36px));
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr);
+  gap: 0 11px;
+  padding: 11px 12px 12px;
+  border: 1px solid #171815;
+  background: rgba(251, 250, 247, .97);
+  box-shadow: 5px 5px 0 rgba(23, 24, 21, .2);
+  color: #171815;
+}
+
+.review-demo-selector::before {
+  content: "Cached fixtures";
+  position: absolute;
+  right: 11px;
+  top: 11px;
+  color: #737267;
+  font: 7px "IBM Plex Mono", monospace;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.demo-selector-signal {
+  grid-row: 1 / 3;
+  width: 8px;
+  height: 8px;
+  margin-top: 4px;
+  border-radius: 50%;
+  background: #d95c3f;
+  box-shadow: 0 0 0 4px #f8e5de;
+}
+
+.demo-selector-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-right: 80px;
+}
+
+.demo-selector-copy small {
+  color: #737267;
+  font: 7px "IBM Plex Mono", monospace;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+}
+
+.demo-selector-copy strong { font-size: 10px; font-weight: 600; }
+
+.review-demo-selector select {
+  grid-column: 2;
+  min-width: 0;
+  width: 100%;
+  height: 31px;
+  margin-top: 8px;
+  padding: 0 30px 0 8px;
+  border: 1px solid #aaa59b;
+  border-radius: 0;
+  background: #f3f1ec;
+  color: #171815;
+  font: 9px "IBM Plex Mono", monospace;
+  cursor: pointer;
+}
+
+.review-demo-selector select:hover { border-color: #171815; }
+.review-demo-selector select:focus-visible { outline: 3px solid #315cf5; outline-offset: 2px; }
+
+.review-story-root button { cursor: pointer; }
+.review-story-root .eyebrow,
+.review-story-root .mono,
+.review-story-root .section-label {
+  color: var(--review-muted);
+  font: 10px "IBM Plex Mono", monospace;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+}
+
+.review-story-root .topbar {
+  position: relative;
+  z-index: 20;
+  min-height: 82px;
+  display: grid;
+  grid-template-columns: 240px minmax(280px, 1fr) auto;
+  align-items: stretch;
+  border-bottom: 1px solid var(--review-ink);
+  background: var(--review-panel);
+}
+
+.review-story-root .brand-lockup,
+.review-story-root .repo-identity,
+.review-story-root .review-stats { display: flex; align-items: center; }
+.review-story-root .brand-lockup { gap: 12px; padding: 0 20px; border-right: 1px solid var(--review-line); }
+.review-story-root .brand-mark { width: 34px; height: 34px; display: grid; place-items: center; background: var(--review-ink); color: white; font: 10px "IBM Plex Mono", monospace; }
+.review-story-root .brand-lockup div:last-child { display: flex; flex-direction: column; gap: 2px; }
+.review-story-root .brand-lockup span { font-size: 13px; font-weight: 600; }
+.review-story-root .brand-lockup small { color: var(--review-muted); font-size: 10px; }
+.review-story-root .repo-identity { display: block; min-width: 0; padding: 17px 24px; }
+.review-story-root .repo-identity h1 { overflow: hidden; margin: 5px 0 0; font-size: 18px; font-weight: 500; letter-spacing: -.025em; text-overflow: ellipsis; white-space: nowrap; }
+.review-story-root .repo-identity h1 span { color: var(--review-accent); font: 12px "IBM Plex Mono", monospace; }
+.review-story-root .review-stats { align-self: stretch; }
+.review-story-root .review-stats div { min-width: 92px; height: 100%; display: flex; flex-direction: column; justify-content: center; padding: 0 18px; border-left: 1px solid var(--review-line); }
+.review-story-root .review-stats strong { font: 18px "IBM Plex Mono", monospace; }
+.review-story-root .review-stats span { margin-top: 3px; color: var(--review-muted); font-size: 9px; }
+
+.review-story-root .workspace { min-height: calc(100vh - 83px); display: grid; grid-template-columns: 240px minmax(420px, 1fr) 320px; }
+.review-story-root .chapter-rail { display: flex; flex-direction: column; border-right: 1px solid var(--review-ink); background: #eae7e0; }
+.review-story-root .rail-heading { display: flex; justify-content: space-between; padding: 18px 16px; border-bottom: 1px solid var(--review-line); color: var(--review-muted); font: 9px "IBM Plex Mono", monospace; letter-spacing: .08em; text-transform: uppercase; }
+.review-story-root .rail-heading strong { color: var(--review-ink); font-weight: 400; }
+.review-story-root .chapter-rail nav { padding: 9px; }
+.review-story-root .chapter-button { width: 100%; display: grid; grid-template-columns: 27px 1fr 8px; align-items: center; gap: 7px; padding: 13px 8px; border: 1px solid transparent; background: transparent; text-align: left; }
+.review-story-root .chapter-button + .chapter-button { border-top-color: var(--review-line); }
+.review-story-root .chapter-button:hover { background: rgba(255,255,255,.55); }
+.review-story-root .chapter-button.active { border-color: var(--review-ink); background: var(--review-panel); box-shadow: 3px 3px 0 #cbc5ba; }
+.review-story-root .chapter-index { color: var(--review-muted); font: 9px "IBM Plex Mono", monospace; }
+.review-story-root .chapter-button > span:nth-child(2) { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.review-story-root .chapter-button strong { overflow: hidden; font-size: 11px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.review-story-root .chapter-button small { color: var(--review-muted); font-size: 9px; }
+.review-story-root .chapter-status { width: 6px; height: 6px; border: 1px solid var(--review-muted); border-radius: 50%; }
+.review-story-root .chapter-button.active .chapter-status { border-color: var(--review-accent); background: var(--review-accent); box-shadow: 0 0 0 3px var(--review-accent-soft); }
+.review-story-root .chapter-button.status-done .chapter-status { border-color: #657767; background: #657767; box-shadow: inset 0 0 0 1px #eae7e0; }
+.review-story-root .chapter-button.status-recheck .chapter-status { border-color: var(--review-accent); background: var(--review-accent-soft); box-shadow: 0 0 0 3px var(--review-accent-soft); }
+.review-story-root .rail-note { margin: auto 16px 18px; padding-top: 16px; border-top: 1px solid var(--review-line); }
+.review-story-root .rail-note p { margin: 8px 0 0; color: var(--review-muted); font-size: 10px; line-height: 1.5; }
+
+.review-story-root .content-column { min-width: 0; display: flex; flex-direction: column; background: var(--review-panel); }
+.review-story-root .view-toolbar { min-height: 49px; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 16px; border-bottom: 1px solid var(--review-line); }
+.review-story-root .view-tabs { align-self: stretch; display: flex; }
+.review-story-root .view-tabs button { position: relative; padding: 0 14px; border: 0; background: transparent; color: var(--review-muted); font-size: 10px; }
+.review-story-root .view-tabs button[aria-selected="true"] { color: var(--review-ink); font-weight: 600; }
+.review-story-root .view-tabs button[aria-selected="true"]::after { content: ""; position: absolute; right: 10px; bottom: -1px; left: 10px; height: 2px; background: var(--review-accent); }
+.review-story-root .legend { display: flex; gap: 13px; color: var(--review-muted); font-size: 8px; white-space: nowrap; }
+.review-story-root .legend span::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 5px; border-radius: 50%; background: #b8b3a9; }
+.review-story-root .legend .human::before { background: var(--review-accent); }
+.review-story-root .legend .standard::before { background: #697567; }
+.review-story-root .map-stage { position: relative; flex: 1; min-height: 590px; overflow: hidden; background: #f7f4ee; }
+.review-story-root .map-caption { position: absolute; z-index: 5; top: 20px; left: 20px; width: min(330px, calc(100% - 40px)); padding: 16px 18px; border: 1px solid var(--review-ink); background: rgba(251,250,247,.94); box-shadow: 4px 4px 0 #d3cdc1; pointer-events: none; }
+.review-story-root .map-caption h2 { margin: 7px 0; font-size: 19px; font-weight: 500; letter-spacing: -.03em; }
+.review-story-root .map-caption p { margin: 0; color: var(--review-muted); font-size: 10px; line-height: 1.5; }
+.review-story-root .map-scope-trigger { position: absolute; z-index: 6; top: 20px; right: 20px; display: grid; grid-template-columns: auto auto auto; border: 1px solid var(--review-ink); background: rgba(251,250,247,.94); box-shadow: 3px 3px 0 #d3cdc1; }
+.review-story-root .map-scope-trigger button { position: relative; min-height: 30px; padding: 0 10px; border: 0; background: transparent; color: var(--review-muted); font: 8px "IBM Plex Mono", monospace; letter-spacing: .035em; white-space: nowrap; }
+.review-story-root .map-scope-trigger button + button { border-left: 1px solid var(--review-line); }
+.review-story-root .map-scope-trigger button:hover { background: rgba(23,24,21,.055); color: var(--review-ink); }
+.review-story-root .map-scope-trigger button[aria-pressed="true"] { background: var(--review-ink); color: white; }
+.review-story-root .map-scope-trigger button[aria-pressed="true"]::after { content: ""; position: absolute; right: 8px; bottom: -4px; left: 8px; height: 2px; background: var(--review-accent); }
+.review-story-root .repository-map-status { position: absolute; z-index: 5; top: 62px; right: 20px; width: min(230px, calc(100% - 40px)); padding-top: 3px; border-top: 1px solid rgba(115,114,103,.38); color: var(--review-muted); text-align: right; pointer-events: none; }
+.review-story-root .repository-map-status > span { font: 7px "IBM Plex Mono", monospace; letter-spacing: .08em; text-transform: uppercase; }
+.review-story-root .repository-map-status p { margin: 4px 0 0; font-size: 8px; line-height: 1.45; }
+.review-story-root .repository-map-status.status-unsupported { border-top-color: rgba(217,92,63,.58); }
+.review-story-root .architecture-node { width: 232px; min-height: 146px; padding: 14px; border: 1px solid #a9a399; background: rgba(251,250,247,.95); box-shadow: 3px 3px 0 rgba(169,163,153,.32); opacity: .52; transition: opacity 160ms ease, border-color 160ms ease, box-shadow 160ms ease; }
+.review-story-root .architecture-node.is-route { opacity: .78; }
+.review-story-root .architecture-node.is-core { border-color: var(--review-ink); opacity: 1; }
+.review-story-root .architecture-node.is-selected { border-color: var(--review-accent); box-shadow: 4px 4px 0 var(--review-accent-soft); }
+.review-story-root .node-kicker { display: flex; justify-content: space-between; color: var(--review-muted); font: 8px "IBM Plex Mono", monospace; text-transform: uppercase; }
+.review-story-root .node-architecture-section { display: inline-block; margin-top: 12px; padding: 3px 5px; border-left: 2px solid #697567; background: #ece9e2; color: #565c53; font: 7px "IBM Plex Mono", monospace; letter-spacing: .05em; text-transform: uppercase; }
+.review-story-root .architecture-node > strong { display: block; margin: 8px 0 5px; font-size: 14px; font-weight: 600; }
+.review-story-root .node-chapter { display: block; overflow: hidden; color: var(--review-muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.review-story-root .node-severity { display: flex; align-items: center; gap: 6px; margin-top: 14px; font-size: 8px; }
+.review-story-root .severity-dot { width: 6px; height: 6px; border-radius: 50%; background: #8c9288; }
+.review-story-root .severity-needs-human .severity-dot { background: var(--review-accent); }
+.review-story-root .severity-noise .severity-dot { background: #bbb6ac; }
+.review-story-root .node-handle { width: 7px; height: 7px; border: 1px solid var(--review-panel); background: var(--review-ink); }
+.review-story-root .react-flow__controls { border: 1px solid var(--review-ink); border-radius: 0; box-shadow: 3px 3px 0 #d3cdc1; }
+.review-story-root .react-flow__controls-button { border-bottom-color: var(--review-line); background: var(--review-panel); }
+.review-story-root .review-placeholder { flex: 1; min-height: 590px; padding: clamp(46px, 8vw, 110px); background: #f7f4ee; }
+.review-story-root .review-placeholder h2 { max-width: 640px; margin: 18px 0; font-size: clamp(36px, 5vw, 72px); font-weight: 500; letter-spacing: -.06em; line-height: .95; }
+.review-story-root .review-placeholder > p { max-width: 600px; color: var(--review-muted); line-height: 1.6; }
+.review-story-root .entry-card { max-width: 650px; display: flex; flex-direction: column; gap: 10px; margin-top: 36px; padding: 18px; border: 1px solid var(--review-ink); background: var(--review-panel); box-shadow: 5px 5px 0 #d3cdc1; }
+.review-story-root .entry-card span { color: var(--review-muted); font: 9px "IBM Plex Mono", monospace; text-transform: uppercase; }
+.review-story-root .entry-card code { overflow-wrap: anywhere; font-size: 11px; }
+.review-story-root .placeholder-note { margin-top: 34px; font-size: 11px; }
+
+/* Guided review: the ordered queue is the spine, the evidence panel is the proof. */
+.review-story-root .guided-review { position: relative; flex: 1; min-height: 590px; display: flex; flex-direction: column; overflow: hidden; background: #f7f4ee; }
+.review-story-root .review-progress-bar { height: 3px; flex: 0 0 3px; background: #ded9cf; }
+.review-story-root .review-progress-bar span { display: block; height: 100%; background: var(--review-accent); transition: width 180ms ease; }
+.review-story-root .review-chapter-heading { min-height: 82px; display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 14px 20px; border-bottom: 1px solid var(--review-line); background: var(--review-panel); }
+.review-story-root .review-chapter-heading h2 { margin: 5px 0 0; font-size: 21px; font-weight: 500; letter-spacing: -.035em; }
+.review-story-root .chapter-progress-copy { display: flex; align-items: baseline; gap: 7px; }
+.review-story-root .chapter-progress-copy strong { font: 18px "IBM Plex Mono", monospace; }
+.review-story-root .chapter-progress-copy span { color: var(--review-muted); font-size: 9px; }
+.review-story-root .review-workspace { min-height: 0; flex: 1; display: grid; grid-template-columns: 220px minmax(0, 1fr); }
+.review-story-root .review-queue { min-width: 0; border-right: 1px solid var(--review-ink); background: #efebe3; }
+.review-story-root .queue-heading { display: flex; justify-content: space-between; padding: 12px; border-bottom: 1px solid var(--review-line); color: var(--review-muted); font: 8px "IBM Plex Mono", monospace; letter-spacing: .07em; text-transform: uppercase; }
+.review-story-root .queue-heading strong { color: var(--review-ink); font-weight: 400; }
+.review-story-root .queue-list { padding: 7px; }
+.review-story-root .queue-file { width: 100%; display: grid; grid-template-columns: 24px minmax(0, 1fr) 7px; align-items: center; gap: 6px; padding: 11px 7px; border: 1px solid transparent; border-bottom-color: var(--review-line); background: transparent; text-align: left; }
+.review-story-root .queue-file:hover { background: rgba(255,255,255,.62); }
+.review-story-root .queue-file.active { border-color: var(--review-ink); background: var(--review-panel); box-shadow: 3px 3px 0 #cec7ba; }
+.review-story-root .queue-order { color: var(--review-muted); font: 8px "IBM Plex Mono", monospace; }
+.review-story-root .queue-file-copy { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.review-story-root .queue-file-copy strong { overflow: hidden; font: 9px "IBM Plex Mono", monospace; text-overflow: ellipsis; white-space: nowrap; }
+.review-story-root .queue-file-copy small { color: var(--review-muted); font-size: 8px; }
+.review-story-root .queue-state { width: 7px; height: 7px; border: 1px solid #9f9a90; border-radius: 50%; }
+.review-story-root .queue-file.status-reviewed .queue-state { border-color: #657767; background: #657767; box-shadow: inset 0 0 0 1px #efebe3; }
+.review-story-root .queue-file.status-recheck .queue-state { border-color: var(--review-accent); background: var(--review-accent-soft); }
+.review-story-root .diff-panel { min-width: 0; display: flex; flex-direction: column; background: #1d1f1c; color: #e7e4dc; }
+.review-story-root .diff-toolbar { min-height: 50px; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 15px; border-bottom: 1px solid #383a35; background: #252723; }
+.review-story-root .diff-toolbar > div { min-width: 0; display: flex; align-items: center; gap: 11px; }
+.review-story-root .diff-toolbar .mono { color: #979b91; }
+.review-story-root .diff-toolbar strong { overflow: hidden; font: 11px "IBM Plex Mono", monospace; text-overflow: ellipsis; white-space: nowrap; }
+.review-story-root .fixture-badge { flex: none; padding: 4px 6px; border: 1px solid #5b5e55; color: #b8bcb2; font: 7px "IBM Plex Mono", monospace; letter-spacing: .08em; text-transform: uppercase; }
+.review-story-root .diff-path { overflow: hidden; padding: 9px 15px; border-bottom: 1px solid #383a35; color: #969a90; font: 8px "IBM Plex Mono", monospace; text-overflow: ellipsis; white-space: nowrap; }
+.review-story-root .diff-code { min-height: 360px; flex: 1; overflow: auto; padding: 12px 0 24px; font-size: 10px; line-height: 1.65; }
+.review-story-root .diff-line { min-width: max-content; display: grid; grid-template-columns: 42px minmax(0, 1fr); padding-right: 18px; }
+.review-story-root .diff-line code { color: #cfd2ca; font: 10px/1.65 "IBM Plex Mono", monospace; white-space: pre; }
+.review-story-root .diff-number { padding-right: 10px; color: #666a62; font: 8px/2.05 "IBM Plex Mono", monospace; text-align: right; user-select: none; }
+.review-story-root .diff-added { background: rgba(83, 134, 91, .18); }
+.review-story-root .diff-added code { color: #bfddc2; }
+.review-story-root .diff-removed { background: rgba(177, 76, 57, .16); }
+.review-story-root .diff-removed code { color: #e4b5a9; }
+.review-story-root .diff-hunk { margin: 7px 0; background: rgba(78, 99, 142, .24); }
+.review-story-root .diff-hunk code { color: #afc1e6; }
+.review-story-root .diff-navigation { min-height: 49px; display: flex; align-items: center; justify-content: space-between; border-top: 1px solid #383a35; background: #252723; }
+.review-story-root .diff-navigation button { align-self: stretch; padding: 0 15px; border: 0; background: transparent; color: #e7e4dc; font-size: 9px; }
+.review-story-root .diff-navigation button:hover:not(:disabled) { background: #33352f; }
+.review-story-root .diff-navigation button:disabled { color: #64675f; cursor: default; }
+.review-story-root .diff-navigation span { color: #8d9187; font: 8px "IBM Plex Mono", monospace; }
+.review-story-root .review-empty { margin: auto; max-width: 480px; padding: 40px; text-align: center; }
+.review-story-root .review-empty h3 { margin: 14px 0 8px; font-size: 24px; font-weight: 500; }
+.review-story-root .review-empty p { color: var(--review-muted); font-size: 11px; line-height: 1.6; }
+.review-story-root .review-complete { width: min(520px, calc(100% - 48px)); margin: auto; padding: 34px; border: 1px solid var(--review-ink); background: var(--review-panel); box-shadow: 6px 6px 0 #d3cdc1; }
+.review-story-root .review-complete.status-recheck { border-color: var(--review-accent); box-shadow: 6px 6px 0 var(--review-accent-soft); }
+.review-story-root .review-complete h3 { margin: 12px 0 7px; font-size: 32px; font-weight: 500; letter-spacing: -.045em; }
+.review-story-root .review-complete > p { margin: 0; color: var(--review-muted); font-size: 11px; }
+.review-story-root .completion-counts { display: grid; grid-template-columns: 1fr 1fr; margin-top: 28px; border: 1px solid var(--review-line); }
+.review-story-root .completion-counts > div { display: flex; flex-direction: column; gap: 4px; padding: 18px; }
+.review-story-root .completion-counts > div + div { border-left: 1px solid var(--review-line); }
+.review-story-root .completion-counts strong { font: 24px "IBM Plex Mono", monospace; }
+.review-story-root .completion-counts span { color: var(--review-muted); font-size: 9px; }
+.review-story-root .completion-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
+.review-story-root .completion-actions button { min-height: 42px; padding: 0 14px; border: 1px solid var(--review-ink); font-size: 9px; }
+.review-story-root .return-map { background: var(--review-ink); color: white; }
+.review-story-root .revisit-rechecks { background: transparent; color: var(--review-ink); }
+.review-story-root .completion-inspector h2 { margin-bottom: 10px; }
+.review-story-root .completion-inspector p { color: var(--review-muted); font-size: 10px; }
+
+.review-story-root .inspector { min-width: 0; padding: 22px 20px; border-left: 1px solid var(--review-ink); background: #eae7e0; }
+.review-story-root .inspector-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.review-story-root .severity-badge { padding: 5px 7px; border: 1px solid #aaa59b; background: var(--review-panel); color: var(--review-muted); font: 8px "IBM Plex Mono", monospace; }
+.review-story-root .severity-badge.needs-human { border-color: var(--review-accent); background: var(--review-accent-soft); color: #9c3d29; }
+.review-story-root .architecture-section-badge { display: inline-block; margin-top: 22px; padding: 5px 7px; border-left: 2px solid #697567; background: #dedfd8; color: #4e584d; font: 8px "IBM Plex Mono", monospace; letter-spacing: .06em; text-transform: uppercase; }
+.review-story-root .inspector h2 { margin: 30px 0 12px; overflow-wrap: anywhere; font-size: 26px; font-weight: 500; letter-spacing: -.045em; line-height: 1.05; }
+.review-story-root .architecture-section-badge + h2 { margin-top: 13px; }
+.review-story-root .inspector > p { margin: 0; color: var(--review-muted); font-size: 11px; line-height: 1.6; }
+.review-story-root .inspector .neighborhood-context-note { margin-top: 15px; padding: 11px 0 0 13px; border-top: 1px solid var(--review-line); border-left: 2px solid var(--review-accent); font-size: 9px; }
+.review-story-root .inspector-rule { margin: 25px 0 18px; border-top: 1px solid var(--review-line); }
+.review-story-root .file-list { margin-top: 10px; }
+.review-story-root .file-list > div { padding: 11px 0; border-top: 1px solid var(--review-line); }
+.review-story-root .file-list code { display: block; overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.review-story-root .file-list span { display: block; margin-top: 4px; color: var(--review-muted); font-size: 9px; line-height: 1.4; }
+.review-story-root .context-note { color: var(--review-muted); font-size: 10px; line-height: 1.5; }
+.review-story-root .step-count { color: var(--review-muted); font: 9px "IBM Plex Mono", monospace; }
+.review-story-root .evidence-list { margin-top: 10px; }
+.review-story-root .evidence-item { position: relative; padding: 12px 0 12px 17px; border-top: 1px solid var(--review-line); }
+.review-story-root .evidence-item::before { content: ""; position: absolute; top: 16px; left: 0; width: 7px; height: 7px; border: 1px solid #8a8b82; border-radius: 50%; }
+.review-story-root .evidence-item.evidence-entry-point::before { border-color: var(--review-accent); background: var(--review-accent); }
+.review-story-root .evidence-item.evidence-risk::before { border-color: var(--review-accent); box-shadow: 0 0 0 3px var(--review-accent-soft); }
+.review-story-root .evidence-item > span { color: var(--review-muted); font: 7px "IBM Plex Mono", monospace; letter-spacing: .08em; text-transform: uppercase; }
+.review-story-root .evidence-item p { margin: 5px 0 0; color: var(--review-ink); font-size: 9px; line-height: 1.5; }
+.review-story-root .evidence-item code { display: block; overflow: hidden; margin-top: 6px; color: var(--review-muted); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.review-story-root .review-actions { display: grid; grid-template-columns: 1fr 1.35fr; gap: 7px; margin-top: 22px; }
+.review-story-root .review-actions button { min-height: 42px; padding: 9px; border: 1px solid var(--review-ink); font-size: 9px; }
+.review-story-root .mark-recheck { background: transparent; color: var(--review-ink); }
+.review-story-root .mark-reviewed { display: flex; align-items: center; justify-content: space-between; background: var(--review-ink); color: white; }
+.review-story-root .mark-reviewed:hover { border-color: var(--review-accent); background: var(--review-accent); }
+.review-story-root .open-chapter { width: 100%; display: flex; justify-content: space-between; margin-top: 22px; padding: 13px 14px; border: 1px solid var(--review-ink); background: var(--review-ink); color: white; font-size: 10px; }
+.review-story-root .open-chapter:hover { background: var(--review-accent); }
+.review-story-root button:focus-visible { outline: 3px solid #315cf5; outline-offset: 2px; }
+
+@media (max-width: 1120px) {
+  .review-story-root .topbar { grid-template-columns: 210px 1fr; }
+  .review-story-root .review-stats { display: none; }
+  .review-story-root .workspace { grid-template-columns: 210px minmax(0, 1fr); }
+  .review-story-root .inspector { grid-column: 1 / -1; border-top: 1px solid var(--review-ink); border-left: 0; }
+  .review-story-root .review-actions { max-width: 420px; }
+}
+
+@media (max-width: 720px) {
+  .review-demo-selector { right: 12px; bottom: 12px; width: min(300px, calc(100vw - 24px)); }
+  .review-story-root .topbar { grid-template-columns: 1fr; }
+  .review-story-root .brand-lockup { display: none; }
+  .review-story-root .repo-identity { padding: 14px 16px; }
+  .review-story-root .workspace { display: block; }
+  .review-story-root .chapter-rail { border-right: 0; border-bottom: 1px solid var(--review-ink); }
+  .review-story-root .chapter-rail nav { display: flex; gap: 5px; overflow-x: auto; }
+  .review-story-root .chapter-button { min-width: 190px; border: 1px solid var(--review-line); }
+  .review-story-root .rail-note { display: none; }
+  .review-story-root .legend { display: none; }
+  .review-story-root .map-stage,
+  .review-story-root .review-placeholder,
+  .review-story-root .guided-review { min-height: 620px; }
+  .review-story-root .map-caption { top: 64px; }
+  .review-story-root .map-scope-trigger { top: 16px; right: 16px; }
+  .review-story-root .repository-map-status { top: 204px; right: 16px; }
+  .review-story-root .review-workspace { grid-template-columns: 1fr; }
+  .review-story-root .review-queue { border-right: 0; border-bottom: 1px solid var(--review-ink); }
+  .review-story-root .queue-list { display: flex; overflow-x: auto; }
+  .review-story-root .queue-file { min-width: 180px; border: 1px solid var(--review-line); }
+  .review-story-root .inspector { padding: 24px 18px 34px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .review-story-root .review-progress-bar span { transition: none; }
+  .review-story-root .map-scope-trigger button { transition: none; }
+}
