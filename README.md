@@ -89,11 +89,19 @@ pnpm build               # production API and Chrome extension builds
 
 Copy `.env.example` to `.env` to configure GitHub/Anthropic credentials, models, analyzer limits, cache/workspace paths, and the demo repository. Public GitHub repositories work without a GitHub token, and a missing Anthropic key deliberately uses deterministic fallbacks. A non-local API also needs matching host permissions and `connect-src` in `apps/extension/wxt.config.ts`.
 
+The `VITE_DEMO_*` settings affect only the standalone side-panel preview. In
+normal extension use, the active GitHub `/owner/repo/pull/number` URL determines
+the repository and PR, so the live harness is not limited to the bundled demos.
+On a repository page, the launcher asks the local API for the repository's open
+pull requests and links the selected item directly to its **Files changed** tab.
+On a pull-request page, the API also resolves the current head SHA, so review
+startup does not depend on GitHub's private DOM metadata.
+
 ## What remains outside this slice
 
 - GitHub context, navigation, and exact diff anchors are implemented but still need the source roadmap's live selector smoke pass.
 - Multi-line range drafting remains deliberately blocked pending live validation.
-- Hosted persistence requires a Supabase project and migration; local development intentionally uses an in-memory store.
+- Hosted persistence requires a Supabase project and `supabase/migrations/20260721_review_harness.sql`; local demos use `REVIEW_SESSION_STORE=memory` and do not need a database password.
 - The harness is single-user and protects secrets server-side; production OAuth and multi-user authorization are still future work.
 - Round-two/delta regeneration remains a separate stretch slice. Story persistence is the API-owned JSON cache under `.review-story/cache` by default.
 

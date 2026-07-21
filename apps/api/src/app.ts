@@ -140,7 +140,13 @@ export async function buildApp(
       if (!headSha) return reply.code(400).send({ error: "head_sha_required" });
       const input = { ...requestData.data, headSha };
       const existing = await sessions.findCurrent(input);
-      if (existing) return publicSession(existing);
+      if (existing) {
+        if (shouldRegenerateCollapsedStory(existing)) {
+          resetSessionStory(existing);
+          await sessions.save(existing);
+        }
+        return publicSession(existing);
+      }
       const session = await sessions.create(input);
       return reply.code(201).send(publicSession(session));
     },
@@ -346,6 +352,9 @@ export async function buildApp(
 }
 
 function createSessionStore(): ReviewSessionStore {
+  if (process.env.REVIEW_SESSION_STORE?.toLowerCase() === "memory") {
+    return new MemoryReviewSessionStore();
+  }
   const url = process.env.SUPABASE_URL;
   const secretKey = process.env.SUPABASE_SECRET_KEY ?? process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (url && secretKey) return new SupabaseReviewSessionStore(url, secretKey);
@@ -432,6 +441,30 @@ function publicSession(session: ReviewSession) {
     createdAt: session.createdAt,
     updatedAt: session.updatedAt,
   };
+}
+
+function shouldRegenerateCollapsedStory(session: ReviewSession): boolean {
+  const configuredVersion = Number(process.env.ANALYZER_VERSION);
+  const artifact = session.artifact;
+  if (!artifact || !Number.isInteger(configuredVersion) || configuredVersion <= 0) return false;
+  const meaningfulFiles = artifact.chapters.reduce(
+    (total, chapter) => total + chapter.files.length,
+    0,
+  );
+  return artifact.meta.versions.analyzer < configuredVersion
+    && artifact.chapters.length === 1
+    && meaningfulFiles > 1;
+}
+
+function resetSessionStory(session: ReviewSession): void {
+  session.status = "NEW";
+  session.completedChapters = [];
+  session.chatTurns = [];
+  session.drafts = [];
+  delete session.currentChapterId;
+  delete session.artifact;
+  delete session.skeleton;
+  delete session.error;
 }
 
 function invalidRequest(

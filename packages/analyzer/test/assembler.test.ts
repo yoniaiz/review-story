@@ -28,6 +28,24 @@ describe("assembler", () => {
     );
   });
 
+  it("splits monorepo packages below a shared top-level directory", () => {
+    const manifest = [
+      row("packages/twenty-client-sdk/src/schema.ts", "STANDARD"),
+      row("packages/twenty-front/src/calendar.tsx", "STANDARD"),
+      row("packages/twenty-server/src/calendar.service.ts", "STANDARD"),
+      row("packages/twenty-shared/src/view.ts", "STANDARD"),
+    ];
+
+    const outline = buildOutline(undefined, manifest, true);
+
+    expect(outline.chapters.map(({ id }) => id)).toEqual([
+      "chapter-packages-twenty-client-sdk",
+      "chapter-packages-twenty-front",
+      "chapter-packages-twenty-server",
+      "chapter-packages-twenty-shared",
+    ]);
+  });
+
   it("rejects outlines with more than five chapters", () => {
     const manifest = Array.from({ length: 6 }, (_, index) => row(`src/file-${index}.ts`, "SKIM"));
     const chapters = manifest.map((item, index) => ({

@@ -512,17 +512,15 @@ function highestAttention(levels: AttentionLevel[]): AttentionLevel {
 }
 
 function groupByDirectory(rows: ManifestRow[]): Map<string, ManifestRow[]> {
-  const discovered = new Map<string, ManifestRow[]>();
-  for (const row of rows) {
-    const parts = row.path.split("/");
-    const directory = parts.length === 1
-      ? "root"
-      : parts[0] === "src" && parts.length > 2
-        ? parts.slice(0, 2).join("/")
-        : parts[0]!;
-    const group = discovered.get(directory) ?? [];
-    group.push(row);
-    discovered.set(directory, group);
+  let discovered = discoverDirectoryGroups(rows, 1, true);
+
+  // Monorepos often place every project below one umbrella directory such as
+  // `packages/` or `apps/`. A first-segment fallback collapses those PRs into
+  // one enormous chapter, so progressively reveal the next directory segment
+  // until there is a useful review split. Never use the filename as a group.
+  for (let depth = 2; discovered.size === 1 && depth <= 4; depth += 1) {
+    const deeper = discoverDirectoryGroups(rows, depth, false);
+    if (deeper.size > 1) discovered = deeper;
   }
   if (discovered.size <= 5) return discovered;
 
@@ -543,6 +541,27 @@ function groupByDirectory(rows: ManifestRow[]): Map<string, ManifestRow[]> {
   }
   groups.set("other", other);
   return groups;
+}
+
+function discoverDirectoryGroups(
+  rows: ManifestRow[],
+  depth: number,
+  splitSourceDirectory: boolean,
+): Map<string, ManifestRow[]> {
+  const discovered = new Map<string, ManifestRow[]>();
+  for (const row of rows) {
+    const parts = row.path.split("/");
+    const directoryParts = parts.slice(0, -1);
+    const directory = directoryParts.length === 0
+      ? "root"
+      : splitSourceDirectory && directoryParts[0] === "src" && directoryParts.length > 1
+        ? directoryParts.slice(0, 2).join("/")
+        : directoryParts.slice(0, depth).join("/");
+    const group = discovered.get(directory) ?? [];
+    group.push(row);
+    discovered.set(directory, group);
+  }
+  return discovered;
 }
 
 function uniqueId(value: string, fallback: string, used: Set<string>): string {
