@@ -1,0 +1,41 @@
+*** Begin Patch
+*** Update File: apps/extension/env.d.ts
+@@
+   readonly VITE_DEMO_PR?: string;
++  readonly VITE_DEMO_HEAD_SHA?: string;
++  readonly VITE_HARNESS_ACCESS_TOKEN?: string;
+*** Update File: apps/extension/entrypoints/sidepanel/App.tsx
+@@
+   pullNumber: Number(import.meta.env.VITE_DEMO_PR ?? "123"),
++  headSha: import.meta.env.VITE_DEMO_HEAD_SHA ?? "<read-current-pr-head-sha>",
++  accessToken: import.meta.env.VITE_HARNESS_ACCESS_TOKEN,
+ };
+@@
++  const [sessionId, setSessionId] = useState<string>();
++
++  const startReview = async () => {
++    const response = await fetch(
++      new URL(`/api/prs/${config.owner}/${config.repo}/pulls/${config.pullNumber}/review-sessions`, config.apiBaseUrl),
++      {
++        method: "POST",
++        headers: {
++          "Content-Type": "application/json",
++          ...(config.accessToken ? { Authorization: `Bearer ${config.accessToken}` } : {}),
++        },
++        body: JSON.stringify({ headSha: config.headSha }),
++      },
++    );
++    const session = await response.json() as { id: string; artifact?: StoryArtifact };
++    setSessionId(session.id);
++    if (session.artifact) return renderArtifact(session.artifact);
++    connectToSessionStream(session.id);
++  };
+@@
++function connectToSessionStream(sessionId: string) {
++  const url = new URL(`/api/review-sessions/${sessionId}/events`, config.apiBaseUrl);
++  if (config.accessToken) url.searchParams.set("access_token", config.accessToken);
++  const source = new EventSource(url);
++  // Reuse the current story.skeleton / story.chapter / story.ready handlers.
++  return source;
++}
+*** End Patch
