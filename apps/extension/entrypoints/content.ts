@@ -11,6 +11,7 @@ import {
 
 const FILE_SELECTOR = "[data-file-path], .file[data-path], [data-testid='diff-file'], copilot-diff-entry";
 const LINE_SELECTOR = "[data-line-number], [data-line], td.blob-num, [id*='diff-'][id*='L'], [id*='diff-'][id*='R']";
+const RESIZE_SETTLE_MS = 80;
 
 function visibleHeight(element: Element): number {
   const rect = element.getBoundingClientRect();
@@ -306,6 +307,32 @@ export default defineContentScript({
     let scheduledFrame: number | undefined;
     let mutationTimer: number | undefined;
     let viewportResizeTimer: number | undefined;
+    let stableViewportWidth = window.innerWidth;
+    let frozenRootWidth: { value: string; priority: string } | undefined;
+
+    const freezeGitHubLayout = () => {
+      if (frozenRootWidth) return;
+      const rootStyle = document.documentElement.style;
+      frozenRootWidth = {
+        value: rootStyle.getPropertyValue("width"),
+        priority: rootStyle.getPropertyPriority("width"),
+      };
+      // Chrome's side panel normally makes GitHub reflow its entire diff for
+      // every pixel of a divider drag. Keep the last settled document width so
+      // intermediate frames only clip/reveal it, then perform one final reflow.
+      rootStyle.setProperty("width", `${stableViewportWidth}px`, "important");
+    };
+    const releaseGitHubLayout = () => {
+      if (!frozenRootWidth) return;
+      const rootStyle = document.documentElement.style;
+      if (frozenRootWidth.value) {
+        rootStyle.setProperty("width", frozenRootWidth.value, frozenRootWidth.priority);
+      } else {
+        rootStyle.removeProperty("width");
+      }
+      frozenRootWidth = undefined;
+      stableViewportWidth = window.innerWidth;
+    };
 
     const readContext = () => {
       const activeFile = findVisibleFile();
@@ -332,10 +359,12 @@ export default defineContentScript({
       void browser.runtime.sendMessage({ type: "primer:context-observed", context });
     };
     const schedulePublishForNextFrame = () => {
+      if (viewportResizeTimer !== undefined) return;
       if (scheduledFrame !== undefined) return;
       scheduledFrame = window.requestAnimationFrame(publish);
     };
     const schedulePublishAfterMutation = () => {
+      if (viewportResizeTimer !== undefined) return;
       if (mutationTimer !== undefined) window.clearTimeout(mutationTimer);
       mutationTimer = window.setTimeout(() => {
         mutationTimer = undefined;
@@ -343,11 +372,25 @@ export default defineContentScript({
       }, 120);
     };
     const schedulePublishAfterResize = () => {
+      freezeGitHubLayout();
+      // A resize can also produce scroll events through browser scroll anchoring.
+      // Cancel work queued by either source so no geometry is read mid-drag.
+      if (scheduledFrame !== undefined) {
+        window.cancelAnimationFrame(scheduledFrame);
+        scheduledFrame = undefined;
+      }
+      if (mutationTimer !== undefined) {
+        window.clearTimeout(mutationTimer);
+        mutationTimer = undefined;
+      }
       if (viewportResizeTimer !== undefined) window.clearTimeout(viewportResizeTimer);
       viewportResizeTimer = window.setTimeout(() => {
         viewportResizeTimer = undefined;
+        // This becomes the baseline for the next drag, so consecutive width
+        // adjustments each freeze and snap independently.
+        releaseGitHubLayout();
         schedulePublishForNextFrame();
-      }, 180);
+      }, RESIZE_SETTLE_MS);
     };
 
     const observer = new MutationObserver(schedulePublishAfterMutation);
@@ -364,6 +407,7 @@ export default defineContentScript({
       if (scheduledFrame !== undefined) window.cancelAnimationFrame(scheduledFrame);
       if (mutationTimer !== undefined) window.clearTimeout(mutationTimer);
       if (viewportResizeTimer !== undefined) window.clearTimeout(viewportResizeTimer);
+      releaseGitHubLayout();
     });
 
     browser.runtime.onMessage.addListener((message) => {

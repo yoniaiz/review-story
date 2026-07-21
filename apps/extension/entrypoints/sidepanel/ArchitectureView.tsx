@@ -20,6 +20,8 @@ type MapScope = "focus" | "pr";
 type LayoutDirection = "LR" | "TB";
 type NodeReviewState = "pending" | "reviewed" | "recheck" | "context";
 
+const NARROW_LAYOUT_QUERY = "(max-width: 699px)";
+
 type ExtensionMapNodeData = Record<string, unknown> & ReviewGraphNode & {
   architectureSection: ReturnType<typeof getArchitectureSection>;
   chapterLabel: string;
@@ -191,7 +193,7 @@ export function ArchitectureView({
 }) {
   const [scope, setScope] = useState<MapScope>("focus");
   const [layoutDirection, setLayoutDirection] = useState<LayoutDirection>(() => (
-    window.innerWidth < 700 ? "TB" : "LR"
+    window.matchMedia(NARROW_LAYOUT_QUERY).matches ? "TB" : "LR"
   ));
   const selected = route[selectedIndex];
   const selectedChapterIndex = selected
@@ -217,12 +219,12 @@ export function ArchitectureView({
     : new Set(plan.graph.nodes.map((node) => node.id)), [focusNodeIds, plan.graph.nodes, scope]);
 
   useEffect(() => {
-    const updateLayoutDirection = () => {
-      const nextDirection = window.innerWidth < 700 ? "TB" : "LR";
-      setLayoutDirection((current) => current === nextDirection ? current : nextDirection);
+    const narrowLayout = window.matchMedia(NARROW_LAYOUT_QUERY);
+    const updateLayoutDirection = ({ matches }: MediaQueryListEvent) => {
+      setLayoutDirection(matches ? "TB" : "LR");
     };
-    window.addEventListener("resize", updateLayoutDirection);
-    return () => window.removeEventListener("resize", updateLayoutDirection);
+    narrowLayout.addEventListener("change", updateLayoutDirection);
+    return () => narrowLayout.removeEventListener("change", updateLayoutDirection);
   }, []);
 
   const graph = useMemo(() => layoutGraph({
