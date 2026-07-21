@@ -18,5 +18,9 @@ export default defineConfig({
     action: {
       default_title: "Open Primer",
     },
+    content_security_policy: {
+      extension_pages:
+        "script-src 'self'; object-src 'self'; connect-src 'self' http://127.0.0.1:8787 http://localhost:8787",
+    },
   },
 });
