@@ -99,24 +99,23 @@ Reviewer B opens the same PR: the story loads instantly from cache (A's open pai
 ## 6. Architecture
 
 ```text
-┌───────────────────────────────┐        HTTPS (REST + SSE)        ┌──────────────────────────────┐
-│   Chrome Extension (WXT)      │ ◄──────────────────────────────► │   Backend (Fastify, TS)      │
-│  · Side panel (React):        │                                  │  · Analyzer pipeline (§7)    │
-│    story UI, chat, staging;   │                                  │  · ChatEngine (Agent SDK)    │
-│    owns the SSE stream        │                                  │  · GitHub proxy (staging,    │
-│  · Content script:            │                                  │    threads, diffs)           │
-│    drive navigation, watch    │                                  │  · In-process job runner     │
-│    sticky header — nothing    │                                  │    (dedup by cache key)      │
-│    else touches the DOM       │                                  └──────┬──────────────┬────────┘
-└───────────────────────────────┘                                         │              │
-                                                                          ▼              ▼
-                                                            ┌──────────────────┐  ┌─────────────────┐
-                                                            │  GitHub API      │  │  Anthropic API  │
-                                                            │ · PAT (hackathon)│  │ · pipeline:     │
-                                                            │   → App + user   │  │   plain SDK     │
-                                                            │   OAuth later    │  │ · chat: Agent   │
-                                                            └──────────────────┘  │   SDK (locked)  │
-                                                                                  └─────────────────┘
+┌───────────────────────────────┐    HTTPS (REST + SSE)    ┌──────────────────────────────┐
+│   Chrome Extension (WXT)      │ ◄──────────────────────► │ Agent / chat harness         │
+│  · Side panel (React):        │                           │ (Fastify, TS)                 │
+│    review UI, input, staging  │                           │ · reviewer session + progress │
+│  · Content script:            │                           │ · chapter state + chat history│
+│    navigation and page sync   │                           │ · ChatEngine (Agent SDK)      │
+│  · no orchestration state     │                           │ · GitHub proxy + job runner   │
+└───────────────────────────────┘                           └──────┬───────────┬───────┘
+                                                                    │           │
+                                                   analysis request │           │ GitHub/chat tools
+                                                                    ▼           ▼
+                                                     ┌──────────────────┐  ┌─────────────────┐
+                                                     │ Analysis layer   │  │ GitHub + LLM    │
+                                                     │ · pipeline (§7)  │  │ provider APIs   │
+                                                     │ · StoryArtifact  │  │                 │
+                                                     │ · no user state  │  └─────────────────┘
+                                                     └──────────────────┘
 Local state: SQLite (story snapshots + diff snapshots, jobs, user sessions, encrypted tokens)
              /tmp/ws/{repo}/{sha} workspaces (tarball; TTL ~6h idle + LRU cap; re-fetch by SHA)
 ```
@@ -130,6 +129,8 @@ Local state: SQLite (story snapshots + diff snapshots, jobs, user sessions, encr
 | Delta (computed) | Per request | classify current diff vs. the *stored* snapshot at the viewer's checkpoint → NEW/MODIFIED/DROPPED/UNTOUCHED per chapter; never persisted into the shared artifact |
 
 **Cache/job key:** `hash(repo_node_id, pr, head_oid, analyzer_version, prompt_version, schema_version)` — PR number alone would collide across repositories.
+
+**Ownership boundary:** the Chrome extension renders and synchronizes the GitHub page; it does not own durable review flow. The agent/chat harness orchestrates every reviewer-facing action: it creates and restores the session, tracks the active and visited chapters, retains conversation history, invokes the analysis layer, and supplies bounded context to chat. The analysis layer returns only reviewer-neutral artifacts and stream events; it never receives reviewer identity, chapter progress, or chat history.
 
 **Key decisions vs. the original design doc** (rationale in §16): Maki engine → deterministic pipeline behind an `Analyzer` seam · DOM-injected comments → pending-review API (+ Copy fallback) · webhook pre-generation → generate on panel-open + SHA polling · scrollIntoView/IntersectionObserver → native-mechanism ladder + sticky header · chat = Claude Agent SDK behind a `ChatEngine` seam (pi = multi-provider fallback; its docs state it ships no permission system). Kept: GitHub App > PATs for the *product* (PAT for the hackathon), tarball ingestion with size guard, analyzer→artifact→slim-chat decoupling.
 

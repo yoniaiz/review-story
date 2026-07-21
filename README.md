@@ -1,6 +1,6 @@
 # Review Story
 
-Hackathon starter for a Chrome side panel that turns a GitHub pull request into a guided reading order. The repository follows the architecture in [review-story-design.md](./review-story-design.md), with one frozen JSON contract separating the three team workstreams.
+Hackathon starter for a Chrome side panel that turns a GitHub pull request into a guided reading order. The repository follows the architecture in [review-story-design.md](./review-story-design.md), with a frozen analysis contract connecting the extension, the agent/chat harness, and the analysis layer.
 
 ## Start in two commands
 
@@ -24,9 +24,11 @@ The panel always boots with [fixtures/mock-artifact.json](./fixtures/mock-artifa
 
 | Workstream | Primary directory | Safe independent command | Boundary |
 |---|---|---|---|
-| Frontend + GitHub page sync | `apps/extension` | `pnpm dev:extension` | Consumes `StoryArtifact` and SSE events |
-| Backend + GitHub integration | `apps/api` | `pnpm dev:api` | Serves the shared contract; owns auth, storage, GitHub APIs |
-| Agentic PR analysis | `packages/analyzer` | `pnpm analyze:mock` | Implements the `Analyzer` interface and returns validated artifacts |
+| Frontend — Chrome extension | `apps/extension` | `pnpm dev:extension` | Presents the review and owns GitHub page synchronization; consumes harness responses and stream events |
+| Agent / chat harness | `apps/api` | `pnpm dev:api` | The backend for the extension: orchestrates analysis and chat, owns the reviewer session, review chapters/progress, conversation history, persistence, and GitHub integration |
+| Analysis layer | `packages/analyzer` | `pnpm analyze:mock` | Produces validated, reviewer-neutral `StoryArtifact` analysis through the `Analyzer` interface |
+
+The harness is the only layer that combines reviewer state with analysis or decides the next review/chat action. The analysis layer must remain reviewer- and conversation-neutral; the extension must not recreate orchestration state locally.
 
 Treat `packages/contracts` and `fixtures/mock-artifact.json` as frozen integration surfaces during the hackathon. Coordinate changes there before merging; ordinary work inside the three owned directories should not conflict.
 
@@ -34,10 +36,10 @@ Treat `packages/contracts` and `fixtures/mock-artifact.json` as frozen integrati
 
 ```text
 apps/
-  api/          Fastify REST + SSE service
+  api/          Agent/chat harness: Fastify API, session and orchestration boundary
   extension/    WXT + React Chrome side panel and GitHub content script
 packages/
-  analyzer/     Static analyzer adapter; replace its internals with the real pipeline
+  analyzer/     Reviewer-neutral analysis adapter; replace its internals with the real pipeline
   contracts/    Zod schemas, TypeScript types, stream events, Analyzer seam
 fixtures/
   mock-artifact.json  Canonical shared PR digest for parallel development
@@ -66,7 +68,7 @@ The stream emits, in order:
 
 Failures use `story.error`. Every event contains `{ "type": "...", "data": ... }` and is validated by `StoryStreamEventSchema` in the extension.
 
-The real analyzer should implement the existing `Analyzer` interface in `packages/contracts/src/index.ts`. The API does not need to change when static generation is replaced.
+The real analyzer should implement the existing `Analyzer` interface in `packages/contracts/src/index.ts`. The harness owns calling it, associating its result with a reviewer session, and exposing it to the extension; its API does not need to change when static generation is replaced.
 
 ## Useful commands
 
@@ -87,6 +89,6 @@ Copy `.env.example` to `.env` to override the demo repository, local API address
 - The analyzer reads the static fixture and simulates progressive generation.
 - GitHub navigation uses the native file/tree/hash fallback ladder, but still needs the design's spike against the chosen demo PR.
 - **Copy comment** works; **Stage** is visibly reserved for the backend pending-review API.
-- Authentication, persistence, GitHub API calls, chat, and round-two/delta behavior remain separate hackathon slices.
+- Authentication, persistence, GitHub API calls, session-aware chat orchestration, and round-two/delta behavior remain separate hackathon slices.
 
 Before sharing a branch, run `pnpm run check && pnpm test && pnpm build`.
