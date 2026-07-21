@@ -4,6 +4,10 @@ packages:
 allowBuilds:
   esbuild: true
   spawn-sync: false
+  tree-sitter: true
+  tree-sitter-javascript: true
+  tree-sitter-typescript: true
 minimumReleaseAgeExclude:
   - react-dom@19.2.8
   - react@19.2.8
+  - '@anthropic-ai/sdk@0.112.4'

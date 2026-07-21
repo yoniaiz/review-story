@@ -8,4 +8,4 @@ coverage/
 .env
 *.local
 *.log
-
+.review-story/

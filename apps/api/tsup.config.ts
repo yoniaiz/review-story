@@ -6,4 +6,5 @@ export default defineConfig({
   sourcemap: true,
   clean: true,
   noExternal: ["@review-story/analyzer", "@review-story/contracts"],
+  external: ["tree-sitter", "tree-sitter-typescript"],
 });

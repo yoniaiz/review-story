@@ -24,6 +24,9 @@ export class OpenAiResponsesChatEngine implements ChatEngine {
   }
 
   async reply({ session, message }: { session: ReviewSession; message: string }): Promise<ChatReply> {
+    if (process.env.ANALYZER_MODE === "deterministic") {
+      return deterministicEvidenceReply(session, message);
+    }
     if (!this.#apiKey) {
       throw new Error("OPENAI_API_KEY is required to use chat");
     }
@@ -42,6 +45,7 @@ export class OpenAiResponsesChatEngine implements ChatEngine {
     };
     const response = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
+      signal: AbortSignal.timeout(20_000),
       headers: {
         Authorization: `Bearer ${this.#apiKey}`,
         "Content-Type": "application/json",
@@ -59,15 +63,15 @@ export class OpenAiResponsesChatEngine implements ChatEngine {
           { role: "user", content: message },
         ],
       }),
-    });
-    if (!response.ok) {
-      throw new Error(`OpenAI request failed: ${response.status} ${await response.text()}`);
+    }).catch(() => undefined);
+    if (!response?.ok) {
+      return deterministicEvidenceReply(session, message);
     }
     const payload = await response.json() as { id?: string; output_text?: string };
     const text = payload.output_text?.trim() || "I could not produce a review response.";
     const citations = extractAndValidateCitations(text, session);
     if (!citations.length && /[.!?]/.test(text)) {
-      throw new Error("The model returned a review answer without verifiable evidence citations");
+      return deterministicEvidenceReply(session, message);
     }
     return {
       text,
@@ -75,6 +79,53 @@ export class OpenAiResponsesChatEngine implements ChatEngine {
       ...(payload.id ? { responseId: payload.id } : {}),
     };
   }
+}
+
+function deterministicEvidenceReply(session: ReviewSession, message: string): ChatReply {
+  const artifact = session.artifact;
+  if (!artifact) {
+    return {
+      text: "The review outline is still being prepared. Try again when the story is ready.",
+      citations: [],
+    };
+  }
+
+  if (/\b(intent|summary|what.*pr|what.*change)\b/i.test(message)) {
+    return {
+      text: `${artifact.exec_summary.text} ${formatCitations(artifact.exec_summary.evidence)}`,
+      citations: artifact.exec_summary.evidence,
+    };
+  }
+
+  const current = artifact.chapters.find(({ id }) => id === session.currentChapterId);
+  const highestRisk = [...artifact.chapters].sort((left, right) =>
+    attentionRank(right.attention.level) - attentionRank(left.attention.level))[0];
+  const chapter = /\b(risk|danger|scrutinize|concern)\b/i.test(message)
+    ? highestRisk
+    : current ?? highestRisk;
+  if (!chapter) {
+    return {
+      text: `${artifact.exec_summary.text} ${formatCitations(artifact.exec_summary.evidence)}`,
+      citations: artifact.exec_summary.evidence,
+    };
+  }
+  const claim = chapter.scrutinize[0] ?? chapter.summary;
+  return {
+    text: `${claim.text} ${formatCitations(claim.evidence)}`,
+    citations: claim.evidence,
+  };
+}
+
+function formatCitations(citations: Evidence[]): string {
+  return citations
+    .map(({ path, lines }) => `${path}:${lines[0]}-${lines[1]}`)
+    .join(", ");
+}
+
+function attentionRank(level: "SKIM" | "STANDARD" | "DEEP_READ"): number {
+  if (level === "DEEP_READ") return 2;
+  if (level === "STANDARD") return 1;
+  return 0;
 }
 
 function extractAndValidateCitations(text: string, session: ReviewSession): Evidence[] {

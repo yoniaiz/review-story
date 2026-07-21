@@ -1,9 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
 import type { ServerResponse } from "node:http";
+import { resolve } from "node:path";
 import cors from "@fastify/cors";
 import { createAnalyzer } from "@review-story/analyzer";
-import { AnalyzeRequestSchema, type Analyzer, type StoryStreamEvent } from "@review-story/contracts";
+import {
+  AnalyzeRequestSchema,
+  type Analyzer,
+  type StoryStreamEvent,
+} from "@review-story/contracts";
 import Fastify, { type FastifyInstance } from "fastify";
 import {
   addChatTurn,
@@ -16,6 +21,8 @@ import {
 import { OpenAiResponsesChatEngine, type ChatEngine } from "./openai-chat.js";
 import { GitHubPendingReviewPublisher, type GitHubPublisher } from "./github-publisher.js";
 import { SupabaseReviewSessionStore } from "./supabase-session-store.js";
+import { StoryCache } from "./story-cache.js";
+import { StoryService } from "./story-service.js";
 
 interface StoryRouteParams {
   owner: string;
@@ -25,6 +32,8 @@ interface StoryRouteParams {
 
 export interface BuildAppOptions {
   analyzer?: Analyzer;
+  cache?: StoryCache;
+  cacheDirectory?: string;
   logger?: boolean;
   sessions?: ReviewSessionStore;
   chatEngine?: ChatEngine;
@@ -39,6 +48,14 @@ export async function buildApp(
   const sessions = options.sessions ?? createSessionStore();
   const chatEngine = options.chatEngine ?? new OpenAiResponsesChatEngine();
   const githubPublisher = options.githubPublisher ?? new GitHubPendingReviewPublisher();
+  const cache =
+    options.cache ??
+    new StoryCache(
+      options.cacheDirectory ??
+        process.env.STORY_CACHE_ROOT ??
+        resolve(process.cwd(), ".review-story", "cache"),
+    );
+  const stories = new StoryService(analyzer, cache);
 
   await app.register(cors, {
     origin: true,
@@ -110,7 +127,10 @@ export async function buildApp(
         }
         session.status = "GENERATING";
         await sessions.save(session);
-        for await (const event of analyzer.stream(toAnalyzeRequest(session), { signal: abortController.signal })) {
+        for await (const event of stories.stream(
+          toAnalyzeRequest(session),
+          abortController.signal,
+        )) {
           applyStoryEvent(session, event);
           await sessions.save(session);
           if (!(await writeSseEvent(reply.raw, event.type, event))) break;
@@ -211,7 +231,16 @@ export async function buildApp(
         });
       }
 
-      return analyzer.analyze(analyzeRequest.data);
+      const abortController = new AbortController();
+      const abortAnalysis = () => abortController.abort();
+      reply.raw.once("close", abortAnalysis);
+      try {
+        return (
+          await stories.analyze(analyzeRequest.data, abortController.signal)
+        ).artifact;
+      } finally {
+        reply.raw.off("close", abortAnalysis);
+      }
     },
   );
 
@@ -238,9 +267,10 @@ export async function buildApp(
       reply.raw.once("close", abortAnalysis);
 
       try {
-        for await (const event of analyzer.stream(analyzeRequest.data, {
-          signal: abortController.signal,
-        })) {
+        for await (const event of stories.stream(
+          analyzeRequest.data,
+          abortController.signal,
+        )) {
           if (reply.raw.destroyed) break;
           if (!(await writeSseEvent(reply.raw, event.type, event))) break;
         }

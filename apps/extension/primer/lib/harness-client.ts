@@ -1,133 +1,142 @@
-import type { GitHubPageContext } from "./extension-context";
+import type { StoryArtifact, StorySkeleton } from "@review-story/contracts";
 
-export interface HarnessCitation {
-  path: string;
-  lines: [number, number];
-}
+export type ReviewSessionStatus = "NEW" | "GENERATING" | "READY" | "FAILED";
 
 export interface HarnessChatTurn {
   id: string;
   role: "user" | "assistant" | "tool";
   content: string;
-  citations: HarnessCitation[];
+  citations: Array<{ path: string; lines: [number, number] }>;
   createdAt: string;
 }
 
-interface ReviewSessionResponse {
+export interface HarnessDraft {
   id: string;
-  artifact?: unknown;
+  body: string;
+  path: string;
+  line: number;
+  side: "LEFT" | "RIGHT";
+  createdAt: string;
+  publishedAt?: string;
+  githubCommentUrl?: string;
 }
 
-interface ChatResponse {
-  user: HarnessChatTurn;
-  assistant: HarnessChatTurn;
+export interface HarnessSession {
+  id: string;
+  owner: string;
+  repo: string;
+  pullNumber: number;
+  headSha: string;
+  status: ReviewSessionStatus;
+  currentChapterId?: string;
+  completedChapterIds: string[];
+  chatTurns: HarnessChatTurn[];
+  drafts: HarnessDraft[];
+  artifact?: StoryArtifact;
+  skeleton?: StorySkeleton;
+  error?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
-const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8787";
-const accessToken = import.meta.env.VITE_HARNESS_ACCESS_TOKEN;
-const sessionPromises = new Map<string, Promise<string>>();
-
-export async function sendHarnessChatMessage(
-  context: GitHubPageContext,
-  message: string,
-): Promise<ChatResponse> {
-  const sessionId = await getReadySession(context);
-  const response = await fetch(apiUrl(`/api/review-sessions/${encodeURIComponent(sessionId)}/chat/messages`), {
-    method: "POST",
-    headers: requestHeaders(true),
-    body: JSON.stringify({ message }),
-  });
-  if (!response.ok) throw await responseError(response, "Chat is unavailable");
-  return response.json() as Promise<ChatResponse>;
+export interface HarnessConfig {
+  apiBaseUrl: string;
+  accessToken?: string;
 }
 
-async function getReadySession(context: GitHubPageContext): Promise<string> {
-  const owner = context.owner;
-  const repo = context.repository;
-  const pullNumber = context.pullNumber;
-  const headSha = context.activeAnchor?.headSha;
-  if (!owner || !repo || !pullNumber || !headSha) {
-    throw new Error("Select or scroll to a GitHub diff line so Primer can pin the chat to the current commit.");
+export class HarnessClient {
+  readonly #config: HarnessConfig;
+
+  constructor(config: HarnessConfig) {
+    this.#config = config;
   }
 
-  const key = `${owner}/${repo}#${pullNumber}@${headSha}`;
-  const existing = sessionPromises.get(key);
-  if (existing) return existing;
+  async createOrResume(input: {
+    owner: string;
+    repo: string;
+    pullNumber: number;
+    headSha: string;
+  }): Promise<HarnessSession> {
+    return this.#request(
+      `/api/prs/${segment(input.owner)}/${segment(input.repo)}/pulls/${input.pullNumber}/review-sessions`,
+      { method: "POST", body: JSON.stringify({ headSha: input.headSha }) },
+    );
+  }
 
-  const pending = createReadySession(owner, repo, pullNumber, headSha).catch((error) => {
-    sessionPromises.delete(key);
-    throw error;
-  });
-  sessionPromises.set(key, pending);
-  return pending;
-}
+  async getSession(sessionId: string): Promise<HarnessSession> {
+    return this.#request(`/api/review-sessions/${segment(sessionId)}`, { method: "GET" });
+  }
 
-async function createReadySession(
-  owner: string,
-  repo: string,
-  pullNumber: number,
-  headSha: string,
-): Promise<string> {
-  const response = await fetch(apiUrl(
-    `/api/prs/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls/${pullNumber}/review-sessions`,
-  ), {
-    method: "POST",
-    headers: requestHeaders(true),
-    body: JSON.stringify({ headSha }),
-  });
-  if (!response.ok) throw await responseError(response, "Review session could not be started");
-  const session = await response.json() as ReviewSessionResponse;
-  if (!session.id) throw new Error("The review harness returned an invalid session.");
-  if (!session.artifact) await waitForArtifact(session.id);
-  return session.id;
-}
+  async selectChapter(sessionId: string, chapterId: string): Promise<HarnessSession> {
+    return this.#request(
+      `/api/review-sessions/${segment(sessionId)}/chapters/${segment(chapterId)}/select`,
+      { method: "POST" },
+    );
+  }
 
-async function waitForArtifact(sessionId: string): Promise<void> {
-  const url = apiUrl(`/api/review-sessions/${encodeURIComponent(sessionId)}/events`);
-  if (accessToken) url.searchParams.set("access_token", accessToken);
-  const response = await fetch(url);
-  if (!response.ok) throw await responseError(response, "Review evidence could not be prepared");
-  if (!response.body) throw new Error("The review evidence stream was empty.");
+  async completeChapter(sessionId: string, chapterId: string): Promise<HarnessSession> {
+    return this.#request(
+      `/api/review-sessions/${segment(sessionId)}/chapters/${segment(chapterId)}/complete`,
+      { method: "POST" },
+    );
+  }
 
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  while (true) {
-    const { value, done } = await reader.read();
-    buffer += decoder.decode(value, { stream: !done });
-    const chunks = buffer.split("\n\n");
-    buffer = chunks.pop() ?? "";
-    for (const chunk of chunks) {
-      const data = chunk.split("\n")
-        .filter((line) => line.startsWith("data:"))
-        .map((line) => line.slice(5).trim())
-        .join("\n");
-      if (!data) continue;
-      const event = JSON.parse(data) as { type?: string; data?: { message?: string } };
-      if (event.type === "story.ready") return;
-      if (event.type === "story.error") {
-        throw new Error(event.data?.message ?? "Review evidence generation failed.");
-      }
+  async sendChatMessage(sessionId: string, message: string): Promise<{
+    user: HarnessChatTurn;
+    assistant: HarnessChatTurn;
+  }> {
+    return this.#request(`/api/review-sessions/${segment(sessionId)}/chat/messages`, {
+      method: "POST",
+      body: JSON.stringify({ message }),
+    });
+  }
+
+  async createDraft(sessionId: string, input: {
+    body: string;
+    path: string;
+    line: number;
+    side: "LEFT" | "RIGHT";
+  }): Promise<HarnessDraft> {
+    return this.#request(`/api/review-sessions/${segment(sessionId)}/drafts`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  }
+
+  async publishDraft(sessionId: string, draftId: string): Promise<HarnessDraft> {
+    return this.#request(
+      `/api/review-sessions/${segment(sessionId)}/drafts/${segment(draftId)}/publish`,
+      { method: "POST", body: JSON.stringify({ confirm: true }) },
+    );
+  }
+
+  eventsUrl(sessionId: string): string {
+    const url = new URL(`/api/review-sessions/${segment(sessionId)}/events`, this.#config.apiBaseUrl);
+    if (this.#config.accessToken) url.searchParams.set("access_token", this.#config.accessToken);
+    return url.href;
+  }
+
+  async #request<T>(path: string, init: RequestInit): Promise<T> {
+    const response = await fetch(new URL(path, this.#config.apiBaseUrl), {
+      ...init,
+      headers: {
+        ...(init.body !== undefined ? { "Content-Type": "application/json" } : {}),
+        ...(this.#config.accessToken
+          ? { Authorization: `Bearer ${this.#config.accessToken}` }
+          : {}),
+        ...init.headers,
+      },
+    });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => undefined) as
+        | { message?: string; error?: string }
+        | undefined;
+      throw new Error(payload?.message ?? payload?.error ?? `Harness request failed (${response.status})`);
     }
-    if (done) break;
+    return response.json() as Promise<T>;
   }
-  throw new Error("Review evidence generation ended before the artifact was ready.");
 }
 
-function apiUrl(path: string): URL {
-  return new URL(path, apiBaseUrl);
-}
-
-function requestHeaders(json = false): HeadersInit {
-  return {
-    ...(json ? { "Content-Type": "application/json" } : {}),
-    ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
-  };
-}
-
-async function responseError(response: Response, fallback: string): Promise<Error> {
-  const payload = await response.json().catch(() => undefined) as
-    | { message?: string; error?: string }
-    | undefined;
-  return new Error(payload?.message ?? payload?.error ?? `${fallback} (${response.status})`);
+function segment(value: string): string {
+  return encodeURIComponent(value);
 }

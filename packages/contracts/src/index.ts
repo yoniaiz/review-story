@@ -229,7 +229,13 @@ export const StoryArtifactSchema = z
 export const StorySkeletonSchema = z
   .object({
     meta: StoryMetaSchema,
-    tracks: z.array(TrackSchema),
+    tracks: z.array(
+      z.object({
+        id: z.string().min(1),
+        title: z.string().min(1),
+        chapter_order: z.array(z.string().min(1)).min(1),
+      }).strict(),
+    ),
     chapters: z.array(
       z.object({ id: z.string().min(1), title: z.string().min(1) }).strict(),
     ),
@@ -245,6 +251,74 @@ export const AnalyzeRequestSchema = z.object({
   owner: z.string().min(1),
   repo: z.string().min(1),
   pullNumber: z.number().int().positive(),
+}).strict();
+
+export const DiffFileSnapshotSchema = z.object({
+  path: z.string().min(1),
+  previous_path: z.string().min(1).nullable(),
+  status: z.string().min(1),
+  additions: z.number().int().nonnegative(),
+  deletions: z.number().int().nonnegative(),
+  changes: z.number().int().nonnegative(),
+  patch: z.string().nullable(),
+  patch_hash: z.string().min(1),
+}).strict();
+
+export const DiffSnapshotSchema = z.object({
+  repo_node_id: z.string().min(1),
+  pr: z.number().int().positive(),
+  base_oid: z.string().min(1),
+  head_oid: z.string().min(1),
+  files: z.array(DiffFileSnapshotSchema),
+}).strict();
+
+export const StageUsageSchema = z.object({
+  stage: z.enum(["stage1", "stage2", "stage3"]),
+  model: z.string().min(1),
+  calls: z.number().int().nonnegative(),
+  failures: z.number().int().nonnegative(),
+  input_tokens: z.number().int().nonnegative(),
+  output_tokens: z.number().int().nonnegative(),
+  cost_usd: z.number().nonnegative(),
+}).strict();
+
+export const UsageSummarySchema = z.object({
+  stages: z.array(StageUsageSchema),
+  total_input_tokens: z.number().int().nonnegative(),
+  total_output_tokens: z.number().int().nonnegative(),
+  total_cost_usd: z.number().nonnegative(),
+}).strict();
+
+export const AnalyzeResultSchema = z.object({
+  artifact: StoryArtifactSchema,
+  diff_snapshot: DiffSnapshotSchema,
+  usage: UsageSummarySchema,
+}).strict().superRefine((result, context) => {
+  const pairs: Array<[string, unknown, unknown]> = [
+    ["repo_node_id", result.artifact.meta.repo_node_id, result.diff_snapshot.repo_node_id],
+    ["pr", result.artifact.meta.pr, result.diff_snapshot.pr],
+    ["head_oid", result.artifact.meta.head_oid, result.diff_snapshot.head_oid],
+  ];
+  for (const [field, artifactValue, snapshotValue] of pairs) {
+    if (artifactValue !== snapshotValue) {
+      context.addIssue({
+        code: "custom",
+        message: `Artifact and diff snapshot disagree on ${field}`,
+        path: ["diff_snapshot", field],
+      });
+    }
+  }
+});
+
+export const StoryCacheIdentitySchema = z.object({
+  repo_node_id: z.string().min(1),
+  pr: z.number().int().positive(),
+  head_oid: z.string().min(1),
+  versions: z.object({
+    analyzer: z.number().int().positive(),
+    prompt: z.number().int().positive(),
+    schema: z.number().int().positive(),
+  }).strict(),
 }).strict();
 
 export const StoryStreamEventSchema = z.discriminatedUnion("type", [
@@ -267,14 +341,25 @@ export type Track = z.infer<typeof TrackSchema>;
 export type StoryArtifact = z.infer<typeof StoryArtifactSchema>;
 export type StorySkeleton = z.infer<typeof StorySkeletonSchema>;
 export type AnalyzeRequest = z.infer<typeof AnalyzeRequestSchema>;
+export type DiffFileSnapshot = z.infer<typeof DiffFileSnapshotSchema>;
+export type DiffSnapshot = z.infer<typeof DiffSnapshotSchema>;
+export type StageUsage = z.infer<typeof StageUsageSchema>;
+export type UsageSummary = z.infer<typeof UsageSummarySchema>;
+export type AnalyzeResult = z.infer<typeof AnalyzeResultSchema>;
+export type StoryCacheIdentity = z.infer<typeof StoryCacheIdentitySchema>;
 export type StoryStreamEvent = z.infer<typeof StoryStreamEventSchema>;
 
 export interface AnalyzerContext {
   signal?: AbortSignal;
+  onResult?: (result: AnalyzeResult) => void | Promise<void>;
 }
 
 export interface Analyzer {
-  analyze(request: AnalyzeRequest, context?: AnalyzerContext): Promise<StoryArtifact>;
+  identify(
+    request: AnalyzeRequest,
+    context?: AnalyzerContext,
+  ): Promise<StoryCacheIdentity>;
+  analyze(request: AnalyzeRequest, context?: AnalyzerContext): Promise<AnalyzeResult>;
   stream(
     request: AnalyzeRequest,
     context?: AnalyzerContext,
