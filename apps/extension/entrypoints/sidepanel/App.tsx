@@ -56,21 +56,18 @@ const ArchitectureView = lazy(async () => {
   const module = await import("./ArchitectureView");
   return { default: module.ArchitectureView };
 });
-// Dev fallback: a shared token baked in at build time. Signed-in users replace
-// accessToken with their personal harness session token at runtime; the
-// HarnessClient reads this object per-request, so mutation takes effect
-// immediately for every client instance.
-const legacyAccessToken = import.meta.env.VITE_HARNESS_ACCESS_TOKEN as string | undefined;
+// Signed-in users set accessToken to their personal harness session token at
+// runtime; the HarnessClient reads this object per-request, so mutation takes
+// effect immediately for every client instance.
 const harnessConfig: { apiBaseUrl: string; accessToken?: string } = {
   apiBaseUrl: import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8787",
-  ...(legacyAccessToken ? { accessToken: legacyAccessToken } : {}),
 };
 
 type AuthState =
   | { status: "loading" }
   | { status: "signed-out"; error?: string }
   | { status: "signed-in"; login: string }
-  | { status: "legacy" };
+  | { status: "demo" };
 const DEMO_PULL_REQUESTS = [
   {
     value: "itayfry/king-of-tokens#1",
@@ -261,7 +258,7 @@ function SignInScreen({ onSignIn, onDemoContinue, error }: {
         >
           <span>
             <span>Continue without signing in</span>
-            <small>Opens {selectedDemo.label} · uses the shared dev token</small>
+            <small>Opens {selectedDemo.label} · local dev API only</small>
           </span>
           <span><ExternalLink size={15} /></span>
         </button>
@@ -1114,7 +1111,7 @@ export function App() {
         harnessConfig.accessToken = stored.sessionToken;
         setAuth({ status: "signed-in", login: stored.login });
       } else {
-        setAuth(legacyAccessToken ? { status: "legacy" } : { status: "signed-out" });
+        setAuth({ status: "signed-out" });
       }
     });
   }, []);
@@ -1136,23 +1133,20 @@ export function App() {
       ? { sessionToken: harnessConfig.accessToken, login: auth.login }
       : undefined;
     void signOut(harnessConfig.apiBaseUrl, stored).finally(() => {
-      if (legacyAccessToken) harnessConfig.accessToken = legacyAccessToken;
-      else delete harnessConfig.accessToken;
-      setAuth(legacyAccessToken ? { status: "legacy" } : { status: "signed-out" });
+      delete harnessConfig.accessToken;
+      setAuth({ status: "signed-out" });
     });
   }, [auth]);
 
-  // Workaround while the GitHub App isn't registered: skip OAuth and rely on
-  // the legacy shared token (or the unauthenticated local dev API).
+  // Demo path: skip OAuth and rely on the unauthenticated local dev API.
   const handleDemoContinue = useCallback((destination: string) => {
-    setAuth({ status: "legacy" });
+    setAuth({ status: "demo" });
     void browser.tabs.create({ url: destination });
   }, []);
 
   const handleSessionExpired = useCallback(() => {
     void clearStoredAuth().finally(() => {
-      if (legacyAccessToken) harnessConfig.accessToken = legacyAccessToken;
-      else delete harnessConfig.accessToken;
+      delete harnessConfig.accessToken;
       setAuth({ status: "signed-out", error: "Your session expired. Sign in again." });
     });
   }, []);

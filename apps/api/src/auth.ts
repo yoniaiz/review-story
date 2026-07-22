@@ -3,8 +3,6 @@ import type { GitHubOAuthClient } from "./github-oauth.js";
 import type { HarnessUser, UserStore } from "./user-store.js";
 
 export interface RequestAuth {
-  /** Set when authenticated via the legacy shared HARNESS_ACCESS_TOKEN. */
-  legacy?: boolean;
   user?: HarnessUser;
 }
 
@@ -26,15 +24,13 @@ const REFRESH_SKEW_MS = 5 * 60 * 1000;
 export class AuthService {
   readonly #users: UserStore;
   readonly #oauth: GitHubOAuthClient | undefined;
-  readonly #legacyToken: string | undefined;
   // GitHub rotates the refresh token on every use; serialize refreshes per
   // user so concurrent requests never burn the same refresh token twice.
   readonly #refreshing = new Map<string, Promise<string>>();
 
-  constructor(users: UserStore, oauth?: GitHubOAuthClient, legacyToken = process.env.HARNESS_ACCESS_TOKEN) {
+  constructor(users: UserStore, oauth?: GitHubOAuthClient) {
     this.#users = users;
     this.#oauth = oauth;
-    this.#legacyToken = legacyToken || undefined;
   }
 
   get users(): UserStore {
@@ -51,10 +47,6 @@ export class AuthService {
     const token = extractToken(request);
     if (!token) {
       await reply.code(401).send({ error: "unauthorized" });
-      return;
-    }
-    if (this.#legacyToken && token === this.#legacyToken) {
-      request.auth = { legacy: true };
       return;
     }
     const user = await this.#users.findSessionUser(token);

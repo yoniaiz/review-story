@@ -61,7 +61,7 @@ describe("AuthService", () => {
     const users = new MemoryUserStore();
     const user = await users.upsertUserFromGitHub({ githubUserId: 7, login: "octocat" });
     await users.createSession(user.id, "session-token", 60_000);
-    const auth = new AuthService(users, undefined, undefined);
+    const auth = new AuthService(users, undefined);
 
     const app = Fastify();
     app.addHook("onRequest", (request, reply) => auth.authenticate(request, reply));
@@ -84,26 +84,11 @@ describe("AuthService", () => {
     await app.close();
   });
 
-  it("still accepts the legacy shared token during migration", async () => {
-    const auth = new AuthService(new MemoryUserStore(), undefined, "legacy-token");
-    const app = Fastify();
-    app.addHook("onRequest", (request, reply) => auth.authenticate(request, reply));
-    app.get("/whoami", async (request) => ({ legacy: request.auth?.legacy === true }));
-
-    const response = await app.inject({
-      method: "GET",
-      url: "/whoami",
-      headers: { authorization: "Bearer legacy-token" },
-    });
-    expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({ legacy: true });
-    await app.close();
-  });
 
   it("returns fresh tokens and refreshes expiring ones exactly once", async () => {
     const users = new MemoryUserStore();
     const user = await users.upsertUserFromGitHub({ githubUserId: 7, login: "octocat" });
-    const auth = new AuthService(users, fakeOAuth(), undefined);
+    const auth = new AuthService(users, fakeOAuth());
 
     await users.saveTokens(user.id, tokenPair());
     expect(await auth.getUserGitHubToken(user.id)).toBe("ghu_access");
@@ -124,7 +109,7 @@ describe("AuthService", () => {
   it("demands re-auth when no tokens are stored", async () => {
     const users = new MemoryUserStore();
     const user = await users.upsertUserFromGitHub({ githubUserId: 7, login: "octocat" });
-    const auth = new AuthService(users, fakeOAuth(), undefined);
+    const auth = new AuthService(users, fakeOAuth());
     await expect(auth.getUserGitHubToken(user.id)).rejects.toBeInstanceOf(ReauthRequiredError);
   });
 });
@@ -132,7 +117,7 @@ describe("AuthService", () => {
 describe("auth routes", () => {
   it("runs the full sign-in flow and serves /auth/me", async () => {
     const users = new MemoryUserStore();
-    const auth = new AuthService(users, fakeOAuth(), undefined);
+    const auth = new AuthService(users, fakeOAuth());
     const app = Fastify();
     registerAuthRoutes(app, auth, {
       publicBaseUrl: "https://api.example.com",
@@ -186,7 +171,7 @@ describe("auth routes", () => {
   });
 
   it("rejects redirect URIs outside the extension allowlist", async () => {
-    const auth = new AuthService(new MemoryUserStore(), fakeOAuth(), undefined);
+    const auth = new AuthService(new MemoryUserStore(), fakeOAuth());
     const app = Fastify();
     registerAuthRoutes(app, auth, {
       publicBaseUrl: "https://api.example.com",

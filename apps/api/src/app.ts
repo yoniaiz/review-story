@@ -94,11 +94,11 @@ export async function buildApp(
     app.addHook("onRequest", (request, reply) => auth.authenticate(request, reply));
     registerAuthRoutes(app, auth);
   } else {
-    app.log.warn("No HARNESS_ACCESS_TOKEN or GitHub App configured; API is running unauthenticated (dev only)");
+    app.log.warn("No GitHub App configured; API is running unauthenticated (dev only)");
   }
 
-  // Per-user GitHub token for the current request. Legacy shared-token auth
-  // (and the unauthenticated dev mode) fall back to the server env tokens.
+  // Per-user GitHub token for the current request. The unauthenticated dev
+  // mode falls back to the server env tokens.
   const githubTokenFor = async (request: FastifyRequest): Promise<string | undefined> => {
     const userId = request.auth?.user?.id;
     if (!auth || !userId) return undefined;
@@ -392,11 +392,8 @@ export async function buildApp(
 }
 
 function createAuthService(): AuthService | undefined {
-  const legacyToken = process.env.HARNESS_ACCESS_TOKEN;
-  const oauthConfigured = process.env.GITHUB_APP_CLIENT_ID && process.env.GITHUB_APP_CLIENT_SECRET;
-  if (!legacyToken && !oauthConfigured) return undefined;
-  const oauth = oauthConfigured ? new GitHubOAuthClient() : undefined;
-  return new AuthService(createUserStore(), oauth, legacyToken);
+  if (!process.env.GITHUB_APP_CLIENT_ID || !process.env.GITHUB_APP_CLIENT_SECRET) return undefined;
+  return new AuthService(createUserStore(), new GitHubOAuthClient());
 }
 
 function createUserStore(): UserStore {
