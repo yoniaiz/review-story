@@ -1106,12 +1106,22 @@ export function App() {
   const [auth, setAuth] = useState<AuthState>({ status: "loading" });
 
   useEffect(() => {
-    void getStoredAuth().then((stored) => {
-      if (stored) {
-        harnessConfig.accessToken = stored.sessionToken;
-        setAuth({ status: "signed-in", login: stored.login });
-      } else {
+    void getStoredAuth().then(async (stored) => {
+      if (!stored) {
         setAuth({ status: "signed-out" });
+        return;
+      }
+      harnessConfig.accessToken = stored.sessionToken;
+      // Validate the stored session before trusting it: a restarted or
+      // redeployed API may no longer recognize the token, and every other
+      // surface would then fail with an opaque "unauthorized".
+      try {
+        const viewer = await new HarnessClient(harnessConfig).getMe();
+        setAuth({ status: "signed-in", login: viewer.login });
+      } catch {
+        await clearStoredAuth();
+        delete harnessConfig.accessToken;
+        setAuth({ status: "signed-out", error: "Your session expired. Sign in again." });
       }
     });
   }, []);
