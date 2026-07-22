@@ -25,10 +25,12 @@ const FILE_SELECTOR = [
 ].join(", ");
 const LINE_SELECTOR = "[data-line-number], [data-line], td.blob-num, [id*='diff-'][id*='L'], [id*='diff-'][id*='R']";
 const RESIZE_SETTLE_MS = 80;
-const DIFF_SCROLL_MIN_MS = 700;
-const DIFF_SCROLL_MAX_MS = 1_300;
 const DIFF_SCROLL_STICKY_OFFSET = 88;
+const DIFF_SCROLL_MIN_MS = 450;
+const DIFF_SCROLL_MAX_MS = 1_100;
+const DIFF_SCROLL_MAX_FRAME_PX = 90;
 let activeDiffScrollFrame: number | undefined;
+let activeDiffScrollTarget: { element: Element; block: DiffScrollBlock } | undefined;
 
 type DiffScrollBlock = "start" | "center";
 
@@ -42,37 +44,65 @@ function diffScrollTop(target: Element, block: DiffScrollBlock): number {
   return Math.min(maxScrollTop, Math.max(0, desiredTop));
 }
 
-function animateDiffScroll(target: Element, block: DiffScrollBlock): void {
+function cancelDiffScroll(): void {
   if (activeDiffScrollFrame !== undefined) {
     window.cancelAnimationFrame(activeDiffScrollFrame);
     activeDiffScrollFrame = undefined;
   }
+  activeDiffScrollTarget = undefined;
+}
+
+function animateDiffScroll(target: Element, block: DiffScrollBlock): void {
+  // Re-requests for the in-flight destination arrive constantly while
+  // GitHub hydrates virtualized rows; restarting the glide reads as a jump.
+  if (
+    activeDiffScrollFrame !== undefined
+    && activeDiffScrollTarget?.element === target
+    && activeDiffScrollTarget.block === block
+  ) {
+    return;
+  }
+  cancelDiffScroll();
 
   const startTop = window.scrollY;
-  const targetTop = diffScrollTop(target, block);
-  const distance = targetTop - startTop;
+  const distance = diffScrollTop(target, block) - startTop;
   if (Math.abs(distance) < 2 || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-    window.scrollTo({ top: targetTop, behavior: "auto" });
+    window.scrollTo({ top: startTop + distance, behavior: "auto" });
     return;
   }
 
-  // Native smooth scrolling is intentionally browser-timed and can look like
-  // a snap across a large PR. Keep the demo movement legible and predictable.
+  // One hand-driven glide for every distance: native smooth scroll cannot be
+  // cancelled or retargeted, and hydration shifts the layout mid-scroll, so
+  // the destination is recomputed from the element on every frame.
   const duration = Math.min(
     DIFF_SCROLL_MAX_MS,
-    Math.max(DIFF_SCROLL_MIN_MS, DIFF_SCROLL_MIN_MS + Math.abs(distance) * 0.08),
+    Math.max(DIFF_SCROLL_MIN_MS, DIFF_SCROLL_MIN_MS + Math.abs(distance) * 0.25),
   );
   const startedAt = performance.now();
+  activeDiffScrollTarget = { element: target, block };
   const tick = (now: number) => {
+    if (!target.isConnected) {
+      cancelDiffScroll();
+      return;
+    }
     const progress = Math.min(1, (now - startedAt) / duration);
     const eased = progress < 0.5
-      ? 4 * progress ** 3
-      : 1 - ((-2 * progress + 2) ** 3) / 2;
-    window.scrollTo({ top: startTop + distance * eased, behavior: "auto" });
-    if (progress < 1) {
+      ? 2 * progress ** 2
+      : 1 - ((-2 * progress + 2) ** 2) / 2;
+    const targetTop = diffScrollTop(target, block);
+    // Hydration can move the destination mid-glide; capping how far a single
+    // frame travels absorbs the shift over several frames instead of snapping.
+    const desired = startTop + (targetTop - startTop) * eased;
+    const step = Math.max(
+      -DIFF_SCROLL_MAX_FRAME_PX,
+      Math.min(DIFF_SCROLL_MAX_FRAME_PX, desired - window.scrollY),
+    );
+    window.scrollTo({ top: window.scrollY + step, behavior: "auto" });
+    const settled = progress >= 1 && Math.abs(diffScrollTop(target, block) - window.scrollY) < 2;
+    if (!settled && now - startedAt < duration * 2) {
       activeDiffScrollFrame = window.requestAnimationFrame(tick);
     } else {
-      activeDiffScrollFrame = undefined;
+      cancelDiffScroll();
     }
   };
   activeDiffScrollFrame = window.requestAnimationFrame(tick);
@@ -267,11 +297,50 @@ function findActiveAnchor(activeFile?: string): DiffAnchor | undefined {
     ?? (activeFile ? findVisibleAnchor(activeFile, headSha) : undefined);
 }
 
+const STEP_HIGHLIGHT_CLASS = "primer-step-highlight";
+let stepHighlightStyle: HTMLStyleElement | undefined;
+
+function ensureStepHighlightStyle(): void {
+  if (stepHighlightStyle?.isConnected) return;
+  stepHighlightStyle = document.createElement("style");
+  stepHighlightStyle.textContent = `
+    .${STEP_HIGHLIGHT_CLASS} {
+      box-shadow: inset 3px 0 0 #315cf5 !important;
+      background-color: rgba(49, 92, 245, 0.07) !important;
+    }
+  `;
+  document.head.append(stepHighlightStyle);
+}
+
+function clearStepHighlights(): void {
+  for (const element of document.querySelectorAll(`.${STEP_HIGHLIGHT_CLASS}`)) {
+    element.classList.remove(STEP_HIGHLIGHT_CLASS);
+  }
+}
+
+function highlightMountedRange(
+  file: Element,
+  path: string,
+  startLine: number,
+  endLine: number,
+  side: DiffSide,
+): void {
+  ensureStepHighlightStyle();
+  for (const element of file.querySelectorAll(LINE_SELECTOR)) {
+    const point = pointFromLineElement(element, path);
+    if (!point || point.side !== side) continue;
+    if (point.line < startLine || point.line > endLine) continue;
+    const row = element.closest("tr, [role='row'], [data-testid='diff-line']") ?? element;
+    row.classList.add(STEP_HIGHLIGHT_CLASS);
+  }
+}
+
 function scrollToMountedDiff(
   path: string,
   line?: number,
   side: DiffSide = "RIGHT",
   exactLineOnly = false,
+  endLine?: number,
 ): boolean {
   const target = findFileElement(path);
   if (!target) return false;
@@ -284,6 +353,10 @@ function scrollToMountedDiff(
   if (line && exactLineOnly && !lineTarget) return false;
   const scrollTarget = lineTarget?.closest("tr, [role='row'], [data-testid='diff-line']") ?? lineTarget ?? target;
   animateDiffScroll(scrollTarget, lineTarget ? "center" : "start");
+  clearStepHighlights();
+  if (lineTarget && line) {
+    highlightMountedRange(target, path, line, Math.max(endLine ?? line, line), side);
+  }
   if (scrollTarget instanceof HTMLElement) {
     scrollTarget.animate(
       [
@@ -301,16 +374,17 @@ function waitForMountedLine(
   path: string,
   line: number,
   side: DiffSide,
+  endLine?: number,
   timeoutMs = 2_000,
 ): Promise<boolean> {
-  if (scrollToMountedDiff(path, line, side, true)) return Promise.resolve(true);
+  if (scrollToMountedDiff(path, line, side, true, endLine)) return Promise.resolve(true);
   return new Promise((resolve) => {
     const timeout = window.setTimeout(() => {
       observer.disconnect();
       resolve(false);
     }, timeoutMs);
     const observer = new MutationObserver(() => {
-      if (!scrollToMountedDiff(path, line, side, true)) return;
+      if (!scrollToMountedDiff(path, line, side, true, endLine)) return;
       window.clearTimeout(timeout);
       observer.disconnect();
       resolve(true);
@@ -319,8 +393,13 @@ function waitForMountedLine(
   });
 }
 
-async function navigateToDiff(path: string, line?: number, side: DiffSide = "RIGHT"): Promise<boolean> {
-  if (scrollToMountedDiff(path, line, side)) return true;
+async function navigateToDiff(
+  path: string,
+  line?: number,
+  side: DiffSide = "RIGHT",
+  endLine?: number,
+): Promise<boolean> {
+  if (scrollToMountedDiff(path, line, side, false, endLine)) return true;
 
   // If GitHub has not mounted the file yet, navigate to the stable file
   // fragment first. Exact line scrolling is retried once the diff is mounted;
@@ -341,7 +420,7 @@ async function navigateToDiff(path: string, line?: number, side: DiffSide = "RIG
   const fragmentTarget = document.getElementById(fragment);
   if (fragmentTarget) {
     animateDiffScroll(fragmentTarget, "start");
-    if (line) void waitForMountedLine(path, line, side);
+    if (line) void waitForMountedLine(path, line, side, endLine);
     return true;
   }
 
@@ -357,7 +436,7 @@ async function navigateToDiff(path: string, line?: number, side: DiffSide = "RIG
     .find((link) => link.getAttribute("href")?.endsWith(`#${fragment}`));
   if (nativeLink) {
     nativeLink.click();
-    if (line) void waitForMountedLine(path, line, side);
+    if (line) void waitForMountedLine(path, line, side, endLine);
     return true;
   }
 
@@ -367,8 +446,15 @@ async function navigateToDiff(path: string, line?: number, side: DiffSide = "RIG
 
 async function navigateToAnchor(anchor: DiffAnchor): Promise<boolean> {
   const currentHeadSha = readHeadSha();
-  if (currentHeadSha && !isSameGitCommit(currentHeadSha, anchor.headSha)) return false;
-  return navigateToDiff(anchor.path, anchor.line, anchor.side);
+  if (currentHeadSha && !isSameGitCommit(currentHeadSha, anchor.headSha)) {
+    // The PR moved past the plan's commit, so exact line numbers are suspect.
+    // Still glide to the file: a hard URL fallback in the panel snaps the
+    // page and loses the reviewer's place entirely.
+    return navigateToDiff(anchor.path);
+  }
+  // A range anchor scrolls to its first line and highlights through the last.
+  const startLine = anchor.startLine ?? anchor.line;
+  return navigateToDiff(anchor.path, startLine, anchor.startSide ?? anchor.side, anchor.line);
 }
 
 function findAnchorLineElement(anchor: DiffAnchor): Element | undefined {
@@ -591,25 +677,32 @@ export default defineContentScript({
     ctx.addEventListener(window, "popstate", schedulePublishForNextFrame);
     ctx.onInvalidated(() => {
       observer.disconnect();
-      if (activeDiffScrollFrame !== undefined) {
-        window.cancelAnimationFrame(activeDiffScrollFrame);
-        activeDiffScrollFrame = undefined;
-      }
+      cancelDiffScroll();
       if (scheduledFrame !== undefined) window.cancelAnimationFrame(scheduledFrame);
       if (mutationTimer !== undefined) window.clearTimeout(mutationTimer);
       if (viewportResizeTimer !== undefined) window.clearTimeout(viewportResizeTimer);
       releaseGitHubLayout();
     });
 
-    browser.runtime.onMessage.addListener((message) => {
+    // The native chrome messaging API ignores a Promise returned from an
+    // onMessage listener, so the sender would always resolve to undefined and
+    // the side panel would treat every navigation as failed. Deliver async
+    // results through sendResponse and keep the channel open by returning true.
+    browser.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       if (!isPrimerExtensionMessage(message)) return undefined;
-      if (message.type === "primer:request-context") return Promise.resolve(readContext());
+      const respond = (result: Promise<unknown> | unknown): true => {
+        void Promise.resolve(result)
+          .catch(() => false)
+          .then((value) => sendResponse(value));
+        return true;
+      };
+      if (message.type === "primer:request-context") return respond(readContext());
       if (message.type === "primer:navigate-file") {
-        return navigateToDiff(message.path, message.line, message.side);
+        return respond(navigateToDiff(message.path, message.line, message.side));
       }
-      if (message.type === "primer:navigate-anchor") return navigateToAnchor(message.anchor);
+      if (message.type === "primer:navigate-anchor") return respond(navigateToAnchor(message.anchor));
       if (message.type === "primer:draft-comment") {
-        return draftNativeComment(message.anchor, message.body);
+        return respond(draftNativeComment(message.anchor, message.body));
       }
       return undefined;
     });
