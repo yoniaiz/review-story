@@ -257,6 +257,8 @@ export function buildChapterCard(
           ? nonempty(modelFile.note, deterministicFileNote(row))
           : deterministicFileNote(row),
       anchor_hunks: anchors.length > 0 ? anchors : fallbackHunks(row),
+      attention_floor: row.attentionFloor,
+      imports_changed_files: row.importsChangedFiles,
     };
   });
 
@@ -309,6 +311,7 @@ export function assembleArtifact(
   manifest: ManifestRow[],
   context: ResolvedContext[],
   output?: Stage3Output,
+  warnings: string[] = [],
 ): StoryArtifact {
   const chapterIds = new Set(chapters.map((chapter) => chapter.id));
   const lineCounts = new Map(manifest.map((row) => [row.path, row.lineCount]));
@@ -406,6 +409,7 @@ export function assembleArtifact(
       head_oid: identity.head_oid,
       versions: identity.versions,
       status: "READY",
+      ...(warnings.length > 0 ? { warnings } : {}),
     },
     exec_summary,
     tracks,

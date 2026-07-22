@@ -75,8 +75,8 @@ export function loadAnalyzerConfig(
     workspaceRoot:
       environment.STORY_WORKSPACE_ROOT ?? join(tmpdir(), "review-story", "workspaces"),
     versions: {
-      analyzer: positiveInteger(environment.ANALYZER_VERSION, 1),
-      prompt: positiveInteger(environment.ANALYZER_PROMPT_VERSION, 1),
+      analyzer: positiveInteger(environment.ANALYZER_VERSION, 2),
+      prompt: positiveInteger(environment.ANALYZER_PROMPT_VERSION, 2),
       schema: 1,
     },
     pricing: {
