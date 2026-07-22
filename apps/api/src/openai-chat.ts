@@ -23,9 +23,11 @@ export interface ChatEngine {
  */
 export class OpenAiResponsesChatEngine implements ChatEngine {
   readonly #apiKey: string | undefined;
+  readonly #model: string;
 
-  constructor(apiKey?: string) {
+  constructor(apiKey?: string, model?: string) {
     this.#apiKey = apiKey ?? process.env.OPENAI_API_KEY;
+    this.#model = model ?? process.env.OPENAI_CHAT_MODEL ?? "gpt-5.6-terra";
   }
 
   async reply({ session, message, scope }: { session: ReviewSession; message: string; scope: ChatStepScope }): Promise<ChatReply> {
@@ -65,7 +67,7 @@ export class OpenAiResponsesChatEngine implements ChatEngine {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "gpt-5.6-terra",
+        model: this.#model,
         store: false,
         reasoning: { effort: "medium", context: "all_turns" },
         input: [
@@ -77,16 +79,14 @@ export class OpenAiResponsesChatEngine implements ChatEngine {
           { role: "user", content: message },
         ],
       }),
-    }).catch(() => undefined);
-    if (!response?.ok) {
-      return deterministicEvidenceReply(session, message, scope);
+    });
+    if (!response.ok) {
+      const detail = await response.text().catch(() => "");
+      throw new Error(`Chat model request failed (${response.status})${detail ? `: ${detail.slice(0, 200)}` : ""}`);
     }
     const payload = await response.json() as { id?: string; output_text?: string };
     const text = payload.output_text?.trim() || "I could not produce a review response.";
     const citations = extractAndValidateCitations(text, session);
-    if (!citations.length && /[.!?]/.test(text)) {
-      return deterministicEvidenceReply(session, message, scope);
-    }
     return {
       text,
       citations,
