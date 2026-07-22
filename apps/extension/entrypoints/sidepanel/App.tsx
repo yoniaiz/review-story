@@ -17,6 +17,7 @@ import {
   Menu,
   MessageSquareText,
   LoaderCircle,
+  RefreshCw,
   Send,
   ShieldCheck,
   Sparkles,
@@ -273,9 +274,11 @@ function ReviewQueue({ onExpired }: { onExpired: () => void }) {
   const client = useMemo(() => new HarnessClient(harnessConfig), []);
   const [pulls, setPulls] = useState<MyPullSummary[]>([]);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
+  const [refreshCount, setRefreshCount] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
+    setStatus("loading");
     void client.getMyPulls().then((nextPulls) => {
       if (cancelled) return;
       setPulls(nextPulls);
@@ -287,18 +290,37 @@ function ReviewQueue({ onExpired }: { onExpired: () => void }) {
       else setStatus("error");
     });
     return () => { cancelled = true; };
-  }, [client, onExpired]);
+  }, [client, onExpired, refreshCount]);
 
-  if (status === "loading") {
-    return <p className="launcher-copy">Loading your review queue…</p>;
+  const header = (
+    <div className="review-queue-header">
+      <label>Your review queue</label>
+      <button
+        className="review-queue-refresh"
+        type="button"
+        aria-label="Refresh review queue"
+        disabled={status === "loading"}
+        onClick={() => setRefreshCount((count) => count + 1)}
+      >
+        <RefreshCw size={12} className={status === "loading" ? "is-refreshing" : undefined} />
+      </button>
+    </div>
+  );
+
+  let body;
+  if (status === "loading" && !pulls.length) {
+    body = <p className="launcher-copy">Loading your review queue…</p>;
+  } else if (status === "error") {
+    body = <p className="launcher-copy">Could not load your review queue.</p>;
+  } else if (!pulls.length) {
+    body = <p className="launcher-copy">No pull requests are waiting on you.</p>;
   }
-  if (status === "error") {
-    return <p className="launcher-copy">Could not load your review queue.</p>;
-  }
-  if (!pulls.length) {
-    return <p className="launcher-copy">No pull requests are waiting on you.</p>;
+  if (body) {
+    return <>{header}{body}</>;
   }
   return (
+    <>
+    {header}
     <nav className="review-queue" aria-label="Your review queue">
       {pulls.map((pull) => (
         <button
@@ -321,6 +343,7 @@ function ReviewQueue({ onExpired }: { onExpired: () => void }) {
         </button>
       ))}
     </nav>
+    </>
   );
 }
 
@@ -378,7 +401,6 @@ function ContextLauncher({ context, auth, onExpired }: {
       </p>
       {auth.status === "signed-in" ? (
         <div className="repository-picker">
-          <label>Your review queue</label>
           <ReviewQueue onExpired={onExpired} />
         </div>
       ) : null}

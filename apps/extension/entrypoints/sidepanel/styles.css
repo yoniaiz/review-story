@@ -72,6 +72,12 @@ button { color: inherit; }
 .primary-action:hover { background: var(--signal); }
 button.primary-action { border: 0; cursor: pointer; }
 .review-queue { display: grid; gap: 7px; }
+.review-queue-header { display: flex; align-items: center; justify-content: space-between; }
+.review-queue-refresh { display: inline-flex; align-items: center; padding: 2px; border: 0; background: none; color: var(--muted); cursor: pointer; }
+.review-queue-refresh:hover:not(:disabled) { color: var(--ink); }
+.review-queue-refresh:disabled { cursor: default; }
+.review-queue-refresh .is-refreshing { animation: review-queue-spin 0.9s linear infinite; }
+@keyframes review-queue-spin { to { transform: rotate(360deg); } }
 .sign-in-demo { margin-top: 26px; display: grid; gap: 8px; }
 .demo-continue span:last-child { color: var(--muted); }
 .review-queue-item { cursor: pointer; text-align: left; }
