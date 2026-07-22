@@ -17,39 +17,43 @@ export class StoryService {
     this.#cache = cache;
   }
 
-  async analyze(request: AnalyzeRequest, signal?: AbortSignal): Promise<AnalyzeResult> {
-    const { identity, cached } = await this.#lookup(request, signal);
+  async analyze(request: AnalyzeRequest, signal?: AbortSignal, githubToken?: string): Promise<AnalyzeResult> {
+    const { identity, cached } = await this.#lookup(request, signal, githubToken);
     throwIfAborted(signal);
     if (cached) return cached;
-    return this.#job(identity, request).wait(signal);
+    return this.#job(identity, request, githubToken).wait(signal);
   }
 
   async *stream(
     request: AnalyzeRequest,
     signal?: AbortSignal,
+    githubToken?: string,
   ): AsyncIterable<StoryStreamEvent> {
-    const { identity, cached } = await this.#lookup(request, signal);
+    const { identity, cached } = await this.#lookup(request, signal, githubToken);
     throwIfAborted(signal);
     if (cached) {
       yield* eventsForResult(cached);
       return;
     }
-    yield* this.#job(identity, request).subscribe(signal);
+    yield* this.#job(identity, request, githubToken).subscribe(signal);
   }
 
   async #lookup(
     request: AnalyzeRequest,
     signal?: AbortSignal,
+    githubToken?: string,
   ): Promise<{ identity: StoryCacheIdentity; cached: AnalyzeResult | null }> {
-    const identity = await this.#analyzer.identify(
-      request,
-      signal ? { signal } : {},
-    );
+    // identify() runs with the caller's token, so a user who cannot see the
+    // repository fails here instead of reading another user's cached story.
+    const identity = await this.#analyzer.identify(request, {
+      ...(signal ? { signal } : {}),
+      ...(githubToken ? { githubToken } : {}),
+    });
     const entry = await this.#cache.read(identity);
     return { identity, cached: entry?.result ?? null };
   }
 
-  #job(identity: StoryCacheIdentity, request: AnalyzeRequest): GenerationJob {
+  #job(identity: StoryCacheIdentity, request: AnalyzeRequest, githubToken?: string): GenerationJob {
     const key = this.#cache.keyFor(identity);
     const existing = this.#jobs.get(key);
     if (existing) return existing;
@@ -63,6 +67,7 @@ export class StoryService {
       identity,
       request,
       removeJob,
+      githubToken,
     );
     this.#jobs.set(key, job);
     void job.result.catch(() => undefined).finally(removeJob);
@@ -76,6 +81,7 @@ class GenerationJob {
   readonly #identity: StoryCacheIdentity;
   readonly #request: AnalyzeRequest;
   readonly #onAbandoned: () => void;
+  readonly #githubToken: string | undefined;
   readonly #controller = new AbortController();
   readonly #history: StoryStreamEvent[] = [];
   readonly #subscribers = new Set<Subscriber>();
@@ -90,12 +96,14 @@ class GenerationJob {
     identity: StoryCacheIdentity,
     request: AnalyzeRequest,
     onAbandoned: () => void,
+    githubToken?: string,
   ) {
     this.#analyzer = analyzer;
     this.#cache = cache;
     this.#identity = identity;
     this.#request = request;
     this.#onAbandoned = onAbandoned;
+    this.#githubToken = githubToken;
     this.result = this.#run();
   }
 
@@ -141,6 +149,7 @@ class GenerationJob {
     try {
       for await (const event of this.#analyzer.stream(this.#request, {
         signal: this.#controller.signal,
+        ...(this.#githubToken ? { githubToken: this.#githubToken } : {}),
         onResult: async (completed) => {
           this.#cache.assertResultMatchesIdentity(this.#identity, completed);
           result = (await this.#cache.write(this.#identity, completed)).result;

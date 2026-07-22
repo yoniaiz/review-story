@@ -9,8 +9,8 @@ export interface GitHubPullSummary {
 }
 
 export interface GitHubPullReader {
-  list(owner: string, repo: string): Promise<GitHubPullSummary[]>;
-  get(owner: string, repo: string, pullNumber: number): Promise<GitHubPullSummary>;
+  list(owner: string, repo: string, token?: string): Promise<GitHubPullSummary[]>;
+  get(owner: string, repo: string, pullNumber: number, token?: string): Promise<GitHubPullSummary>;
 }
 
 interface GitHubPullPayload {
@@ -30,7 +30,7 @@ export class GitHubRestPullReader implements GitHubPullReader {
     this.#token = token ?? process.env.GITHUB_TOKEN ?? process.env.GITHUB_PAT;
   }
 
-  async list(owner: string, repo: string): Promise<GitHubPullSummary[]> {
+  async list(owner: string, repo: string, token?: string): Promise<GitHubPullSummary[]> {
     const query = new URLSearchParams({
       state: "open",
       sort: "updated",
@@ -39,23 +39,26 @@ export class GitHubRestPullReader implements GitHubPullReader {
     });
     const payload = await this.#request<GitHubPullPayload[]>(
       `/repos/${segment(owner)}/${segment(repo)}/pulls?${query}`,
+      token,
     );
     return payload.map(parsePull);
   }
 
-  async get(owner: string, repo: string, pullNumber: number): Promise<GitHubPullSummary> {
+  async get(owner: string, repo: string, pullNumber: number, token?: string): Promise<GitHubPullSummary> {
     const payload = await this.#request<GitHubPullPayload>(
       `/repos/${segment(owner)}/${segment(repo)}/pulls/${pullNumber}`,
+      token,
     );
     return parsePull(payload);
   }
 
-  async #request<T>(path: string): Promise<T> {
+  async #request<T>(path: string, token?: string): Promise<T> {
+    const effectiveToken = token ?? this.#token;
     const response = await fetch(new URL(path, "https://api.github.com"), {
       headers: {
         Accept: "application/vnd.github+json",
         "X-GitHub-Api-Version": "2026-03-10",
-        ...(this.#token ? { Authorization: `Bearer ${this.#token}` } : {}),
+        ...(effectiveToken ? { Authorization: `Bearer ${effectiveToken}` } : {}),
       },
     });
     if (!response.ok) {

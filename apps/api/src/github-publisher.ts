@@ -5,7 +5,7 @@ export interface PublishedDraft {
 }
 
 export interface GitHubPublisher {
-  publish(session: ReviewSession, draft: CommentDraft): Promise<PublishedDraft>;
+  publish(session: ReviewSession, draft: CommentDraft, token?: string): Promise<PublishedDraft>;
 }
 
 export class GitHubPendingReviewPublisher implements GitHubPublisher {
@@ -15,15 +15,16 @@ export class GitHubPendingReviewPublisher implements GitHubPublisher {
     this.#token = token ?? process.env.GITHUB_PAT;
   }
 
-  async publish(session: ReviewSession, draft: CommentDraft): Promise<PublishedDraft> {
-    if (!this.#token) throw new Error("GITHUB_PAT is required to publish a draft");
+  async publish(session: ReviewSession, draft: CommentDraft, token?: string): Promise<PublishedDraft> {
+    const effectiveToken = token ?? this.#token;
+    if (!effectiveToken) throw new Error("A GitHub token is required to publish a draft");
     const response = await fetch(
       `https://api.github.com/repos/${encodeURIComponent(session.owner)}/${encodeURIComponent(session.repo)}/pulls/${session.pullNumber}/reviews`,
       {
         method: "POST",
         headers: {
           Accept: "application/vnd.github+json",
-          Authorization: `Bearer ${this.#token}`,
+          Authorization: `Bearer ${effectiveToken}`,
           "Content-Type": "application/json",
           "X-GitHub-Api-Version": "2026-03-10",
         },

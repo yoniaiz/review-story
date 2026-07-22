@@ -56,11 +56,38 @@ export interface GitHubPullSummary {
   author?: string;
 }
 
+export interface MyPullSummary {
+  owner: string;
+  repo: string;
+  number: number;
+  title: string;
+  updatedAt: string;
+  author?: string;
+  role: "review-requested" | "assigned";
+}
+
+export interface HarnessViewer {
+  login: string;
+  avatarUrl?: string;
+}
+
 export class HarnessClient {
   readonly #config: HarnessConfig;
 
   constructor(config: HarnessConfig) {
     this.#config = config;
+  }
+
+  async getMe(): Promise<HarnessViewer> {
+    return this.#request("/auth/me", { method: "GET" });
+  }
+
+  async getMyPulls(): Promise<MyPullSummary[]> {
+    const result = await this.#request<{ pulls: MyPullSummary[] }>(
+      "/api/github/my-pulls",
+      { method: "GET" },
+    );
+    return result.pulls;
   }
 
   async listPullRequests(owner: string, repo: string): Promise<GitHubPullSummary[]> {

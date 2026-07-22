@@ -357,6 +357,8 @@ export type StoryStreamEvent = z.infer<typeof StoryStreamEventSchema>;
 export interface AnalyzerContext {
   signal?: AbortSignal;
   onResult?: (result: AnalyzeResult) => void | Promise<void>;
+  /** Acts as this GitHub user for repo/PR reads; falls back to the server token. */
+  githubToken?: string;
 }
 
 export interface Analyzer {

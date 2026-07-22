@@ -37,8 +37,9 @@ export class GitHubFetcher {
   async identify(
     request: AnalyzeRequest,
     signal?: AbortSignal,
+    token?: string,
   ): Promise<StoryCacheIdentity> {
-    const metadata = await this.#fetchMetadata(request, signal);
+    const metadata = await this.#fetchMetadata(request, signal, token);
     return {
       repo_node_id: metadata.repoNodeId,
       pr: metadata.pullNumber,
@@ -50,16 +51,17 @@ export class GitHubFetcher {
   async prepare(
     request: AnalyzeRequest,
     signal?: AbortSignal,
+    token?: string,
   ): Promise<PreparedPull> {
     for (let attempt = 1; attempt <= 2; attempt += 1) {
-      const metadataPromise = this.#fetchMetadata(request, signal);
-      const filesPromise = this.#fetchFiles(request, signal);
+      const metadataPromise = this.#fetchMetadata(request, signal, token);
+      const filesPromise = this.#fetchFiles(request, signal, token);
       const metadata = await metadataPromise;
       const [files, archiveResult] = await Promise.all([
         filesPromise,
-        this.#fetchArchive(request, metadata.headOid, signal),
+        this.#fetchArchive(request, metadata.headOid, signal, token),
       ]);
-      const confirmation = await this.#fetchMetadata(request, signal);
+      const confirmation = await this.#fetchMetadata(request, signal, token);
       if (confirmation.headOid !== metadata.headOid) {
         if (attempt === 2) {
           throw new Error("Pull request head changed repeatedly during preparation");
@@ -94,10 +96,13 @@ export class GitHubFetcher {
   async #fetchMetadata(
     request: AnalyzeRequest,
     signal?: AbortSignal,
+    token?: string,
   ): Promise<PullMetadata> {
     const response = await this.#request(
       `/repos/${encodeURIComponent(request.owner)}/${encodeURIComponent(request.repo)}/pulls/${request.pullNumber}`,
       signal,
+      undefined,
+      token,
     );
     const pull = (await response.json()) as GitHubPullResponse;
     if (!pull.base?.repo?.node_id || !pull.head?.sha || !pull.base?.sha) {
@@ -116,12 +121,15 @@ export class GitHubFetcher {
   async #fetchFiles(
     request: AnalyzeRequest,
     signal?: AbortSignal,
+    token?: string,
   ): Promise<GitHubChangedFile[]> {
     const allFiles: GitHubChangedFile[] = [];
     for (let page = 1; page <= 30; page += 1) {
       const response = await this.#request(
         `/repos/${encodeURIComponent(request.owner)}/${encodeURIComponent(request.repo)}/pulls/${request.pullNumber}/files?per_page=100&page=${page}`,
         signal,
+        undefined,
+        token,
       );
       const pageFiles = (await response.json()) as GitHubFileResponse[];
       allFiles.push(
@@ -147,12 +155,15 @@ export class GitHubFetcher {
     request: AnalyzeRequest,
     headOid: string,
     signal?: AbortSignal,
+    token?: string,
   ): Promise<{ archive?: Uint8Array; warning?: string }> {
     try {
       const reference = encodeURIComponent(headOid);
       const response = await this.#request(
         `/repos/${encodeURIComponent(request.owner)}/${encodeURIComponent(request.repo)}/tarball/${reference}`,
         signal,
+        undefined,
+        token,
       );
       const declaredSize = Number(response.headers.get("content-length") ?? "0");
       if (declaredSize > this.#config.maxArchiveBytes) {
@@ -178,14 +189,16 @@ export class GitHubFetcher {
     path: string,
     signal?: AbortSignal,
     accept = "application/vnd.github+json",
+    token?: string,
   ): Promise<Response> {
+    const effectiveToken = token ?? this.#config.githubToken;
     const response = await this.#fetch(`${this.#config.githubApiBaseUrl}${path}`, {
       headers: {
         Accept: accept,
         "User-Agent": "review-story-analyzer",
         "X-GitHub-Api-Version": "2022-11-28",
-        ...(this.#config.githubToken
-          ? { Authorization: `Bearer ${this.#config.githubToken}` }
+        ...(effectiveToken
+          ? { Authorization: `Bearer ${effectiveToken}` }
           : {}),
       },
       ...(signal ? { signal } : {}),

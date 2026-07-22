@@ -28,6 +28,12 @@ import {
 import { SupabaseReviewSessionStore } from "./supabase-session-store.js";
 import { StoryCache } from "./story-cache.js";
 import { StoryService } from "./story-service.js";
+import { AuthService, ReauthRequiredError } from "./auth.js";
+import { registerAuthRoutes } from "./auth-routes.js";
+import { GitHubOAuthClient } from "./github-oauth.js";
+import { loadEncryptionKey } from "./crypto.js";
+import { MemoryUserStore, SupabaseUserStore, type UserStore } from "./user-store.js";
+import type { FastifyRequest } from "fastify";
 
 interface StoryRouteParams {
   owner: string;
@@ -49,6 +55,7 @@ export interface BuildAppOptions {
   chatEngine?: ChatEngine;
   githubPublisher?: GitHubPublisher;
   githubPullReader?: GitHubPullReader;
+  authService?: AuthService;
 }
 
 export async function buildApp(
@@ -74,19 +81,42 @@ export async function buildApp(
     methods: ["GET", "POST", "PATCH"],
   });
 
-  const accessToken = process.env.HARNESS_ACCESS_TOKEN;
-  if (accessToken) {
-    app.addHook("onRequest", async (request, reply) => {
-      if (request.url.startsWith("/health")) return;
-      const headerToken = request.headers.authorization?.replace(/^Bearer\s+/i, "");
-      const queryToken = new URL(request.url, "http://localhost").searchParams.get("access_token");
-      if (headerToken !== accessToken && queryToken !== accessToken) {
-        return reply.code(401).send({ error: "unauthorized" });
-      }
-    });
+  app.setErrorHandler((error, _request, reply) => {
+    if (error instanceof ReauthRequiredError) {
+      return reply.code(401).send({ error: "reauth_required", message: error.message });
+    }
+    app.log.error(error);
+    return reply.code(500).send({ error: "internal_error" });
+  });
+
+  const auth = options.authService ?? createAuthService();
+  if (auth) {
+    app.addHook("onRequest", (request, reply) => auth.authenticate(request, reply));
+    registerAuthRoutes(app, auth);
+  } else {
+    app.log.warn("No HARNESS_ACCESS_TOKEN or GitHub App configured; API is running unauthenticated (dev only)");
   }
 
+  // Per-user GitHub token for the current request. Legacy shared-token auth
+  // (and the unauthenticated dev mode) fall back to the server env tokens.
+  const githubTokenFor = async (request: FastifyRequest): Promise<string | undefined> => {
+    const userId = request.auth?.user?.id;
+    if (!auth || !userId) return undefined;
+    return auth.getUserGitHubToken(userId);
+  };
+
   app.get("/health", async () => ({ status: "ok" }));
+
+  app.get("/api/github/my-pulls", async (request, reply) => {
+    const userId = request.auth?.user?.id;
+    if (!auth || !userId) return reply.code(401).send({ error: "sign_in_required" });
+    try {
+      const token = await auth.getUserGitHubToken(userId);
+      return { pulls: await searchMyPulls(token) };
+    } catch (error) {
+      return githubTokenFailure(reply, error);
+    }
+  });
 
   app.get<{ Params: RepositoryRouteParams }>(
     "/api/github/repos/:owner/:repo/pulls",
@@ -95,7 +125,8 @@ export async function buildApp(
         return reply.code(400).send({ error: "invalid_request" });
       }
       try {
-        return { pulls: await githubPullReader.list(request.params.owner, request.params.repo) };
+        const token = await githubTokenFor(request);
+        return { pulls: await githubPullReader.list(request.params.owner, request.params.repo, token) };
       } catch (error) {
         return githubReadFailure(reply, error);
       }
@@ -108,10 +139,12 @@ export async function buildApp(
       const requestData = parseRouteParams(request.params);
       if (!requestData.success) return invalidRequest(reply, requestData.error.flatten());
       try {
-        return githubPullReader.get(
+        const token = await githubTokenFor(request);
+        return await githubPullReader.get(
           requestData.data.owner,
           requestData.data.repo,
           requestData.data.pullNumber,
+          token,
         );
       } catch (error) {
         return githubReadFailure(reply, error);
@@ -179,6 +212,7 @@ export async function buildApp(
         for await (const event of stories.stream(
           toAnalyzeRequest(session),
           abortController.signal,
+          await githubTokenFor(request),
         )) {
           applyStoryEvent(session, event);
           await sessions.save(session);
@@ -267,7 +301,8 @@ export async function buildApp(
       if (!draft) return reply.code(404).send({ error: "draft_not_found" });
       if (draft.publishedAt) return reply.code(409).send({ error: "draft_already_published" });
       try {
-        const published = await githubPublisher.publish(session, draft);
+        const token = await githubTokenFor(request);
+        const published = await githubPublisher.publish(session, draft, token);
         draft.publishedAt = new Date().toISOString();
         draft.githubCommentUrl = published.url;
         await sessions.save(session);
@@ -294,7 +329,11 @@ export async function buildApp(
       reply.raw.once("close", abortAnalysis);
       try {
         return (
-          await stories.analyze(analyzeRequest.data, abortController.signal)
+          await stories.analyze(
+            analyzeRequest.data,
+            abortController.signal,
+            await githubTokenFor(request),
+          )
         ).artifact;
       } finally {
         reply.raw.off("close", abortAnalysis);
@@ -328,6 +367,7 @@ export async function buildApp(
         for await (const event of stories.stream(
           analyzeRequest.data,
           abortController.signal,
+          await githubTokenFor(request),
         )) {
           if (reply.raw.destroyed) break;
           if (!(await writeSseEvent(reply.raw, event.type, event))) break;
@@ -349,6 +389,99 @@ export async function buildApp(
   );
 
   return app;
+}
+
+function createAuthService(): AuthService | undefined {
+  const legacyToken = process.env.HARNESS_ACCESS_TOKEN;
+  const oauthConfigured = process.env.GITHUB_APP_CLIENT_ID && process.env.GITHUB_APP_CLIENT_SECRET;
+  if (!legacyToken && !oauthConfigured) return undefined;
+  const oauth = oauthConfigured ? new GitHubOAuthClient() : undefined;
+  return new AuthService(createUserStore(), oauth, legacyToken);
+}
+
+function createUserStore(): UserStore {
+  const url = process.env.SUPABASE_URL;
+  const secretKey = process.env.SUPABASE_SECRET_KEY ?? process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (url && secretKey && process.env.TOKEN_ENCRYPTION_KEY) {
+    return new SupabaseUserStore(url, secretKey, loadEncryptionKey());
+  }
+  return new MemoryUserStore();
+}
+
+interface GitHubSearchItem {
+  number?: number;
+  title?: string;
+  updated_at?: string;
+  html_url?: string;
+  user?: { login?: string } | null;
+}
+
+export interface MyPullSummary {
+  owner: string;
+  repo: string;
+  number: number;
+  title: string;
+  updatedAt: string;
+  author?: string;
+  role: "review-requested" | "assigned";
+}
+
+/** The same queries GitHub's own "Pull requests" dashboard uses. */
+async function searchMyPulls(token: string): Promise<MyPullSummary[]> {
+  const roles = [
+    { role: "review-requested" as const, qualifier: "review-requested:@me" },
+    { role: "assigned" as const, qualifier: "assignee:@me" },
+  ];
+  const results = await Promise.all(roles.map(async ({ role, qualifier }) => {
+    const query = new URLSearchParams({
+      q: `is:open is:pr archived:false ${qualifier}`,
+      sort: "updated",
+      per_page: "30",
+    });
+    const response = await fetch(`https://api.github.com/search/issues?${query}`, {
+      headers: {
+        Accept: "application/vnd.github+json",
+        Authorization: `Bearer ${token}`,
+        "User-Agent": "review-story-api",
+        "X-GitHub-Api-Version": "2022-11-28",
+      },
+    });
+    if (!response.ok) {
+      throw new GitHubPullReaderError(response.status, `GitHub search failed (${response.status})`);
+    }
+    const payload = await response.json() as { items?: GitHubSearchItem[] };
+    return (payload.items ?? []).flatMap((item) => {
+      const match = item.html_url?.match(/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)/);
+      if (!match || !item.number || !item.title || !item.updated_at) return [];
+      return [{
+        owner: match[1]!,
+        repo: match[2]!,
+        number: item.number,
+        title: item.title,
+        updatedAt: item.updated_at,
+        ...(item.user?.login ? { author: item.user.login } : {}),
+        role,
+      }];
+    });
+  }));
+  const seen = new Set<string>();
+  // review-requested wins when a PR appears under both roles.
+  return results.flat().filter((pull) => {
+    const key = `${pull.owner}/${pull.repo}#${pull.number}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+}
+
+function githubTokenFailure(
+  reply: { code(statusCode: number): { send(payload: unknown): unknown } },
+  error: unknown,
+) {
+  if (error instanceof ReauthRequiredError) {
+    return reply.code(401).send({ error: "reauth_required", message: error.message });
+  }
+  return githubReadFailure(reply, error);
 }
 
 function createSessionStore(): ReviewSessionStore {

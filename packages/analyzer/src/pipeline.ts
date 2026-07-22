@@ -72,7 +72,7 @@ export class PipelineAnalyzer implements Analyzer {
     request: AnalyzeRequest,
     context: AnalyzerContext = {},
   ): Promise<StoryCacheIdentity> {
-    return this.#fetcher.identify(request, context.signal);
+    return this.#fetcher.identify(request, context.signal, context.githubToken);
   }
 
   async analyze(
@@ -136,7 +136,7 @@ export class PipelineAnalyzer implements Analyzer {
     hooks: PipelineHooks,
   ): Promise<AnalyzeResult> {
     throwIfAborted(context.signal);
-    const prepared = await this.#fetcher.prepare(request, context.signal);
+    const prepared = await this.#fetcher.prepare(request, context.signal, context.githubToken);
     for (const warning of prepared.warnings) this.#logger.warn(warning);
     const identity: StoryCacheIdentity = {
       repo_node_id: prepared.metadata.repoNodeId,
@@ -275,6 +275,7 @@ export class PipelineAnalyzer implements Analyzer {
       manifest,
       resolvedContext,
       stage3.accepted ? stage3.output : undefined,
+      prepared.warnings,
     );
     return AnalyzeResultSchema.parse({
       artifact,
@@ -312,6 +313,7 @@ function stage1Prompt(title: string, body: string, manifest: ManifestRow[]): str
       pre_binned_noise_must_remain_in_appendix: true,
       chapter_count: "Use 2 to 5 broad, coherent review chapters. Never exceed 5 chapters.",
       chapter_granularity: "Group related files into end-to-end concerns; do not create one chapter per component or file.",
+      chapter_titles: "Title each chapter after the behavior or concern it reviews (like 'Calendar orchestration' or 'Session persistence'), never after a directory, package, or file name.",
       maximum_context_requests: 10,
       skeleton_only: "Do not invent entry points or flow; those are generated later.",
     },

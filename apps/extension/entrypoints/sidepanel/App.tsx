@@ -44,7 +44,9 @@ import {
   HarnessClient,
   type GitHubPullSummary,
   type HarnessSession,
+  type MyPullSummary,
 } from "../../primer/lib/harness-client";
+import { clearStoredAuth, getStoredAuth, signIn, signOut } from "../../primer/lib/auth";
 import { isNearScrollEnd } from "../../primer/lib/chat-scroll";
 import { storyArtifactToReviewPlan } from "../../primer/lib/story-review-plan";
 import { upsertGeneratedChapter } from "../../primer/lib/story-stream-state";
@@ -53,12 +55,21 @@ const ArchitectureView = lazy(async () => {
   const module = await import("./ArchitectureView");
   return { default: module.ArchitectureView };
 });
-const harnessConfig = {
+// Dev fallback: a shared token baked in at build time. Signed-in users replace
+// accessToken with their personal harness session token at runtime; the
+// HarnessClient reads this object per-request, so mutation takes effect
+// immediately for every client instance.
+const legacyAccessToken = import.meta.env.VITE_HARNESS_ACCESS_TOKEN as string | undefined;
+const harnessConfig: { apiBaseUrl: string; accessToken?: string } = {
   apiBaseUrl: import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8787",
-  ...(import.meta.env.VITE_HARNESS_ACCESS_TOKEN
-    ? { accessToken: import.meta.env.VITE_HARNESS_ACCESS_TOKEN }
-    : {}),
+  ...(legacyAccessToken ? { accessToken: legacyAccessToken } : {}),
 };
+
+type AuthState =
+  | { status: "loading" }
+  | { status: "signed-out"; error?: string }
+  | { status: "signed-in"; login: string }
+  | { status: "legacy" };
 const DEMO_PULL_REQUESTS = [
   {
     value: "itayfry/king-of-tokens#1",
@@ -198,7 +209,126 @@ function ChapterRail({ plan, route, statuses, selectedIndex, navigateTo }: {
   );
 }
 
-function ContextLauncher({ context }: { context: GitHubPageContext }) {
+function SignInScreen({ onSignIn, onDemoContinue, error }: {
+  onSignIn: () => void;
+  onDemoContinue: (destination: string) => void;
+  error?: string;
+}) {
+  const [selectedDemoValue, setSelectedDemoValue] = useState<string>(DEMO_PULL_REQUESTS[0].value);
+  const selectedDemo = DEMO_PULL_REQUESTS.find(({ value }) => value === selectedDemoValue)
+    ?? DEMO_PULL_REQUESTS[0];
+  return (
+    <div className="launcher">
+      <div className="launcher-mark"><GitPullRequest size={23} strokeWidth={1.6} /></div>
+      <p className="utility-label">Primer</p>
+      <h1>Sign in with GitHub to begin.</h1>
+      <p className="launcher-copy">
+        Primer analyzes pull requests and publishes review comments as you.
+        Sign in so everything runs under your own GitHub identity.
+      </p>
+      {error ? <p className="launcher-copy" role="alert">{error}</p> : null}
+      <button className="primary-action" type="button" onClick={onSignIn}>
+        Sign in with GitHub
+      </button>
+      <div className="repository-picker pull-request-picker sign-in-demo">
+        <label id="sign-in-demo-picker-label">Or continue with a demo pull request</label>
+        <Select.Root value={selectedDemoValue} onValueChange={setSelectedDemoValue}>
+          <Select.Trigger className="repository-trigger" aria-labelledby="sign-in-demo-picker-label">
+            <span>
+              <Select.Value />
+              <small>{selectedDemo.detail}</small>
+            </span>
+            <Select.Icon><ChevronDown size={15} /></Select.Icon>
+          </Select.Trigger>
+          <Select.Portal>
+            <Select.Content className="repository-select-content" position="popper" sideOffset={6}>
+              <Select.Viewport>
+                {DEMO_PULL_REQUESTS.map((demo) => (
+                  <Select.Item className="repository-option" key={demo.value} value={demo.value}>
+                    <Select.ItemText>{demo.label}</Select.ItemText>
+                    <Select.ItemIndicator><Check size={14} /></Select.ItemIndicator>
+                  </Select.Item>
+                ))}
+              </Select.Viewport>
+            </Select.Content>
+          </Select.Portal>
+        </Select.Root>
+        <button
+          className="repository-trigger demo-continue"
+          type="button"
+          onClick={() => onDemoContinue(selectedDemo.destination)}
+        >
+          <span>
+            <span>Continue without signing in</span>
+            <small>Opens {selectedDemo.label} · uses the shared dev token</small>
+          </span>
+          <span><ExternalLink size={15} /></span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ReviewQueue({ onExpired }: { onExpired: () => void }) {
+  const client = useMemo(() => new HarnessClient(harnessConfig), []);
+  const [pulls, setPulls] = useState<MyPullSummary[]>([]);
+  const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
+
+  useEffect(() => {
+    let cancelled = false;
+    void client.getMyPulls().then((nextPulls) => {
+      if (cancelled) return;
+      setPulls(nextPulls);
+      setStatus("ready");
+    }).catch((error: unknown) => {
+      if (cancelled) return;
+      const message = error instanceof Error ? error.message : "";
+      if (/reauth_required|unauthorized|sign_in_required/i.test(message)) onExpired();
+      else setStatus("error");
+    });
+    return () => { cancelled = true; };
+  }, [client, onExpired]);
+
+  if (status === "loading") {
+    return <p className="launcher-copy">Loading your review queue…</p>;
+  }
+  if (status === "error") {
+    return <p className="launcher-copy">Could not load your review queue.</p>;
+  }
+  if (!pulls.length) {
+    return <p className="launcher-copy">No pull requests are waiting on you.</p>;
+  }
+  return (
+    <nav className="review-queue" aria-label="Your review queue">
+      {pulls.map((pull) => (
+        <button
+          key={`${pull.owner}/${pull.repo}#${pull.number}`}
+          className="repository-trigger review-queue-item"
+          type="button"
+          onClick={() => {
+            void browser.tabs.create({
+              url: `https://github.com/${pull.owner}/${pull.repo}/pull/${pull.number}/files`,
+            });
+          }}
+        >
+          <span>
+            <span>{pull.owner}/{pull.repo} · #{pull.number}</span>
+            <small>
+              {pull.role === "review-requested" ? "Review requested" : "Assigned"}
+              {" · updated "}{new Date(pull.updatedAt).toLocaleDateString()}
+            </small>
+          </span>
+        </button>
+      ))}
+    </nav>
+  );
+}
+
+function ContextLauncher({ context, auth, onExpired }: {
+  context: GitHubPageContext;
+  auth: AuthState;
+  onExpired: () => void;
+}) {
   const client = useMemo(() => new HarnessClient(harnessConfig), []);
   const onGitHub = context.kind === "github";
   const repo = context.owner && context.repository ? `${context.owner}/${context.repository}` : undefined;
@@ -246,6 +376,12 @@ function ContextLauncher({ context }: { context: GitHubPageContext }) {
           ? "When you open a pull request, the review story, evidence, and agent controls will appear here."
           : "Move to a GitHub pull request and this panel will become your evidence-backed review companion."}
       </p>
+      {auth.status === "signed-in" ? (
+        <div className="repository-picker">
+          <label>Your review queue</label>
+          <ReviewQueue onExpired={onExpired} />
+        </div>
+      ) : null}
       <div className="repository-picker">
         <label>Repository</label>
         <div className="repository-trigger repository-current">
@@ -575,6 +711,7 @@ function ReviewConversation({ context, plan, session, client, onSessionChange }:
   const followsLatestRef = useRef(true);
   const renderedChatStateRef = useRef({ scopeKey: "", count: 0 });
   const observedFileRef = useRef(context.activeFile);
+  const suppressFollowUntilRef = useRef(0);
   const [draftFeedback, setDraftFeedback] = useState<{
     tone: "working" | "success" | "error";
     message: string;
@@ -590,13 +727,20 @@ function ReviewConversation({ context, plan, session, client, onSessionChange }:
     : [], [selected, session.chatTurns]);
 
   useEffect(() => {
-    const currentChapterIndex = route.findIndex(({ chapter }) => chapter.id === session.currentChapterId);
-    if (currentChapterIndex >= 0) setSelectedIndex(currentChapterIndex);
+    setSelectedIndex((current) => {
+      if (route[current]?.chapter.id === session.currentChapterId) return current;
+      const currentChapterIndex = route.findIndex(({ chapter }) => chapter.id === session.currentChapterId);
+      return currentChapterIndex >= 0 ? currentChapterIndex : current;
+    });
   }, [route, session.currentChapterId]);
 
   useEffect(() => {
     if (context.activeFile === observedFileRef.current) return;
     observedFileRef.current = context.activeFile;
+    // While Primer itself is scrolling the diff, intermediate files pass
+    // through the viewport; following them would yank the selection away
+    // from the step the reviewer just chose.
+    if (Date.now() < suppressFollowUntilRef.current) return;
     const visibleIndex = findRouteIndexByPath(route, context.activeFile);
     if (visibleIndex >= 0) setSelectedIndex(visibleIndex);
   }, [context.activeFile, route]);
@@ -612,8 +756,10 @@ function ReviewConversation({ context, plan, session, client, onSessionChange }:
     const conversation = conversationRef.current;
     if (!conversation) return;
     const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    // A scope change is a page transition: the step (or the overview) opens
+    // from the top. Within an unchanged scope, new turns keep following.
     conversation.scrollTo({
-      top: conversation.scrollHeight,
+      top: scopeChanged ? 0 : conversation.scrollHeight,
       behavior: reduceMotion ? "auto" : "smooth",
     });
   }, [activeChatTurns.length, selectedScopeKey]);
@@ -635,6 +781,7 @@ function ReviewConversation({ context, plan, session, client, onSessionChange }:
       }
     }
     if (new URLSearchParams(window.location.search).has("preview")) return;
+    suppressFollowUntilRef.current = Date.now() + 1800;
     try {
       const navigated = await navigateGitHubDiff(
         next.file.path,
@@ -769,19 +916,21 @@ function ReviewConversation({ context, plan, session, client, onSessionChange }:
         }}
       >
         <div className="opening-space" aria-hidden="true" />
-        <article className="agent-turn">
-          <div className="trace" aria-hidden="true"><span /></div>
-          <div className="agent-copy">
-            <p className="agent-name"><Sparkles size={13} /> Primer</p>
-            <h1>I’m ready to guide this review.</h1>
-            <p>
-              I found <strong>{repo}#{context.pullNumber}</strong>.
-              {plan
-                ? ` I loaded ${route.length} evidence-backed steps across ${plan.chapters.length} chapters and will follow the diff as you scroll.`
-                : " I’ll follow the diff as you scroll and keep the review tied to the visible code."}
-            </p>
-          </div>
-        </article>
+        {!selected ? (
+          <article className="agent-turn">
+            <div className="trace" aria-hidden="true"><span /></div>
+            <div className="agent-copy">
+              <p className="agent-name"><Sparkles size={13} /> Primer</p>
+              <h1>I’m ready to guide this review.</h1>
+              <p>
+                I found <strong>{repo}#{context.pullNumber}</strong>.
+                {plan
+                  ? ` I loaded ${route.length} evidence-backed steps across ${plan.chapters.length} chapters and will follow the diff as you scroll.`
+                  : " I’ll follow the diff as you scroll and keep the review tied to the visible code."}
+              </p>
+            </div>
+          </article>
+        ) : null}
 
         <section className={`context-card ${context.activeFile ? "is-live" : ""}`}>
           <div className="context-card-heading">
@@ -808,25 +957,38 @@ function ReviewConversation({ context, plan, session, client, onSessionChange }:
           )}
         </section>
 
-        <section className="pr-analysis-card" aria-label="Pull request analysis">
-          <div className="pr-analysis-heading"><GitPullRequest size={14} /><span>PR context &amp; analysis</span></div>
-          <strong>{plan.title}</strong>
-          <div className="pr-analysis-stats">
-            <span><b>{plan.stats.totalFiles}</b> files</span>
-            <span><b>{plan.stats.chapters}</b> chapters</span>
-            <span><b>{plan.stats.noiseFiles}</b> low signal</span>
-          </div>
-          <p>This overview applies to the whole pull request. Step conversations below stay isolated to their own review step.</p>
-          {!selected && route.length ? (
-            <button className="begin-review" type="button" onClick={() => void navigateTo(0)}>
-              Begin chapter 1 <ArrowRight size={14} />
-            </button>
-          ) : null}
-        </section>
+        {!selected ? (
+          <section className="pr-analysis-card" aria-label="Pull request analysis">
+            <div className="pr-analysis-heading"><GitPullRequest size={14} /><span>PR context &amp; analysis</span></div>
+            <strong>{plan.title}</strong>
+            <div className="pr-analysis-stats">
+              <span><b>{plan.stats.totalFiles}</b> files</span>
+              <span><b>{plan.stats.chapters}</b> chapters</span>
+              <span><b>{plan.stats.noiseFiles}</b> low signal</span>
+            </div>
+            <p>This overview applies to the whole pull request. Step conversations open on their own page, scoped to a single review step.</p>
+            {route.length ? (
+              <button className="begin-review" type="button" onClick={() => void navigateTo(0)}>
+                Begin chapter 1 <ArrowRight size={14} />
+              </button>
+            ) : null}
+          </section>
+        ) : null}
 
         {selected ? (
           <section className="review-step-card">
             <div className="step-heading">
+              <button
+                className="step-back"
+                type="button"
+                onClick={() => {
+                  setComposerValue("");
+                  setDraftFeedback(undefined);
+                  setSelectedIndex(-1);
+                }}
+              >
+                <ArrowLeft size={13} /> Overview
+              </button>
               <span>Chapter {chapterNumber} · Step {selectedIndex + 1}/{route.length}</span>
               <span className={`step-status status-${selectedStatus}`}><i /> {selectedStatus}</span>
             </div>
@@ -922,6 +1084,56 @@ function ReviewConversation({ context, plan, session, client, onSessionChange }:
 export function App() {
   const [context, setContext] = useState<GitHubPageContext>(getInitialContext);
   const [panelView, setPanelView] = useState<"conversation" | "architecture">("conversation");
+  const [auth, setAuth] = useState<AuthState>({ status: "loading" });
+
+  useEffect(() => {
+    void getStoredAuth().then((stored) => {
+      if (stored) {
+        harnessConfig.accessToken = stored.sessionToken;
+        setAuth({ status: "signed-in", login: stored.login });
+      } else {
+        setAuth(legacyAccessToken ? { status: "legacy" } : { status: "signed-out" });
+      }
+    });
+  }, []);
+
+  const handleSignIn = useCallback(() => {
+    void signIn(harnessConfig.apiBaseUrl).then((stored) => {
+      harnessConfig.accessToken = stored.sessionToken;
+      setAuth({ status: "signed-in", login: stored.login });
+    }).catch((error: unknown) => {
+      setAuth({
+        status: "signed-out",
+        error: error instanceof Error ? error.message : "Sign-in failed",
+      });
+    });
+  }, []);
+
+  const handleSignOut = useCallback(() => {
+    const stored = harnessConfig.accessToken && auth.status === "signed-in"
+      ? { sessionToken: harnessConfig.accessToken, login: auth.login }
+      : undefined;
+    void signOut(harnessConfig.apiBaseUrl, stored).finally(() => {
+      if (legacyAccessToken) harnessConfig.accessToken = legacyAccessToken;
+      else delete harnessConfig.accessToken;
+      setAuth(legacyAccessToken ? { status: "legacy" } : { status: "signed-out" });
+    });
+  }, [auth]);
+
+  // Workaround while the GitHub App isn't registered: skip OAuth and rely on
+  // the legacy shared token (or the unauthenticated local dev API).
+  const handleDemoContinue = useCallback((destination: string) => {
+    setAuth({ status: "legacy" });
+    void browser.tabs.create({ url: destination });
+  }, []);
+
+  const handleSessionExpired = useCallback(() => {
+    void clearStoredAuth().finally(() => {
+      if (legacyAccessToken) harnessConfig.accessToken = legacyAccessToken;
+      else delete harnessConfig.accessToken;
+      setAuth({ status: "signed-out", error: "Your session expired. Sign in again." });
+    });
+  }, []);
   const identity = useMemo(() => context.kind === "pull-request"
     ? `${context.owner}/${context.repository} · #${context.pullNumber}`
     : "Review companion", [context]);
@@ -1015,19 +1227,36 @@ export function App() {
               </DropdownMenu.Trigger>
               <DropdownMenu.Portal>
                 <DropdownMenu.Content className="menu-content" sideOffset={7} align="end">
-                  <DropdownMenu.Item>Open full workspace <ExternalLink size={13} /></DropdownMenu.Item>
-                  <DropdownMenu.Item>Review settings</DropdownMenu.Item>
+                  {context.kind === "pull-request" ? (
+                    <DropdownMenu.Item onSelect={() => {
+                      void browser.tabs.create({
+                        url: `https://github.com/${context.owner}/${context.repository}/pull/${context.pullNumber}/files`,
+                      });
+                    }}>Open Files changed on GitHub <ExternalLink size={13} /></DropdownMenu.Item>
+                  ) : (
+                    <DropdownMenu.Item onSelect={() => { void browser.tabs.create({ url: "https://github.com/pulls" }); }}>
+                      Open your pull requests <ExternalLink size={13} />
+                    </DropdownMenu.Item>
+                  )}
                   <DropdownMenu.Separator />
-                  <DropdownMenu.Item><Check size={13} /> Live harness</DropdownMenu.Item>
+                  <DropdownMenu.Item disabled><Check size={13} /> Live harness</DropdownMenu.Item>
+                  {auth.status === "signed-in" ? (
+                    <DropdownMenu.Item onSelect={handleSignOut}>
+                      Sign out ({auth.login})
+                    </DropdownMenu.Item>
+                  ) : null}
                 </DropdownMenu.Content>
               </DropdownMenu.Portal>
             </DropdownMenu.Root>
           </div>
         </header>
 
-        {context.kind === "pull-request"
-          ? <LiveReview context={context} panelView={panelView} />
-          : <ContextLauncher context={context} />}
+        {auth.status === "loading" ? null
+          : auth.status === "signed-out"
+            ? <SignInScreen onSignIn={handleSignIn} onDemoContinue={handleDemoContinue} {...(auth.error ? { error: auth.error } : {})} />
+            : context.kind === "pull-request"
+              ? <LiveReview context={context} panelView={panelView} />
+              : <ContextLauncher context={context} auth={auth} onExpired={handleSessionExpired} />}
       </main>
     </Tooltip.Provider>
   );
