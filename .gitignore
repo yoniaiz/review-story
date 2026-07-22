@@ -10,3 +10,4 @@ coverage/
 *.log
 .review-story/
 supabase/.temp/
+primer-dev-key.pem
