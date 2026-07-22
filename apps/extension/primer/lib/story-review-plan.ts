@@ -71,13 +71,16 @@ export function storyArtifactToReviewPlan(
         const claimAnchor = [chapter.summary, ...chapter.scrutinize]
           .flatMap((claim) => claim.evidence)
           .find((evidence) => evidence.path === file.path);
-        const line = claimAnchor?.lines[0] ?? file.anchor_hunks[0]?.[0];
+        const anchorRange = claimAnchor?.lines ?? file.anchor_hunks[0];
+        const line = anchorRange?.[0];
+        const endLine = anchorRange?.[1];
         return {
           fileId: file.path,
           order: index + 1,
           reason: file.note,
           evidence: evidenceForFile(artifact, chapter, file.path),
           ...(line ? { line, side: "RIGHT" as const } : {}),
+          ...(line && endLine && endLine > line ? { endLine } : {}),
           status: statusFor(chapter.id),
         };
       }),

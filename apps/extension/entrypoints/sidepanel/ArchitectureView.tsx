@@ -11,7 +11,7 @@ import {
   type Node,
   type NodeProps,
 } from "@xyflow/react";
-import { CircleDot } from "lucide-react";
+import { ArrowLeft, ArrowRight, ChevronsLeft, ChevronsRight, CircleDot } from "lucide-react";
 import { getArchitectureSection, getNeighborhoodNodeIds } from "../../primer/lib/review-map";
 import type { ExtensionReviewRouteStep } from "../../primer/lib/extension-review";
 import type { ReviewGraphNode, ReviewPlan, ReviewStepStatus, Severity } from "../../primer/lib/review-plan";
@@ -195,6 +195,11 @@ export function ArchitectureView({
   const [layoutDirection, setLayoutDirection] = useState<LayoutDirection>(() => (
     window.matchMedia(NARROW_LAYOUT_QUERY).matches ? "TB" : "LR"
   ));
+  const [layoutPinned, setLayoutPinned] = useState(false);
+  const pickLayoutDirection = (direction: LayoutDirection) => {
+    setLayoutPinned(true);
+    setLayoutDirection(direction);
+  };
   const selected = route[selectedIndex];
   const selectedChapterIndex = selected
     ? plan.chapters.findIndex((chapter) => chapter.id === selected.chapter.id)
@@ -208,6 +213,19 @@ export function ArchitectureView({
   const activeNode = plan.graph.nodes.find((node) => (
     selected ? node.fileIds.includes(selected.file.id) : false
   ));
+  const chapterStartIndex = (index: number): number => {
+    const chapterId = route[index]?.chapter.id;
+    let start = index;
+    while (start > 0 && route[start - 1]?.chapter.id === chapterId) start -= 1;
+    return start;
+  };
+  const currentChapterStart = selected ? chapterStartIndex(selectedIndex) : -1;
+  const previousChapterIndex = currentChapterStart > 0 ? chapterStartIndex(currentChapterStart - 1) : -1;
+  const nextChapterIndex = selected
+    ? route.findIndex((item, index) => index > selectedIndex && item.chapter.id !== selected.chapter.id)
+    : route.length > 0 ? 0 : -1;
+  const previousStepIndex = selectedIndex > 0 ? selectedIndex - 1 : -1;
+  const nextStepIndex = selectedIndex < route.length - 1 ? selectedIndex + 1 : -1;
   const focusNodeIds = useMemo(() => getNeighborhoodNodeIds(
     plan.graph.nodes,
     plan.graph.edges,
@@ -219,13 +237,14 @@ export function ArchitectureView({
     : new Set(plan.graph.nodes.map((node) => node.id)), [focusNodeIds, plan.graph.nodes, scope]);
 
   useEffect(() => {
+    if (layoutPinned) return undefined;
     const narrowLayout = window.matchMedia(NARROW_LAYOUT_QUERY);
     const updateLayoutDirection = ({ matches }: MediaQueryListEvent) => {
       setLayoutDirection(matches ? "TB" : "LR");
     };
     narrowLayout.addEventListener("change", updateLayoutDirection);
     return () => narrowLayout.removeEventListener("change", updateLayoutDirection);
-  }, []);
+  }, [layoutPinned]);
 
   const graph = useMemo(() => layoutGraph({
     plan,
@@ -248,9 +267,22 @@ export function ArchitectureView({
           <strong>Dependency flow</strong>
           <p>{selected ? `Following ${selected.file.path.split("/").at(-1)} in the guided review.` : "Select an area to navigate its first review step in GitHub."}</p>
         </div>
-        <div className="architecture-scope" role="group" aria-label="Dependency map scope">
-          <button type="button" aria-pressed={scope === "focus"} onClick={() => setScope("focus")}>Focus</button>
-          <button type="button" aria-pressed={scope === "pr"} onClick={() => setScope("pr")}>Full PR</button>
+        <div className="architecture-toolbar">
+          <div className="architecture-scope" role="group" aria-label="Dependency map scope">
+            <button type="button" aria-pressed={scope === "focus"} onClick={() => setScope("focus")}>Focus</button>
+            <button type="button" aria-pressed={scope === "pr"} onClick={() => setScope("pr")}>Full PR</button>
+          </div>
+          <div className="architecture-scope" role="group" aria-label="Dependency map layout direction">
+            <button type="button" aria-pressed={layoutDirection === "LR"} onClick={() => pickLayoutDirection("LR")}>Horizontal</button>
+            <button type="button" aria-pressed={layoutDirection === "TB"} onClick={() => pickLayoutDirection("TB")}>Vertical</button>
+          </div>
+          <div className="architecture-nav" role="group" aria-label="Guided review navigation">
+            <button className="control-button" type="button" aria-label="Previous chapter" disabled={previousChapterIndex < 0} onClick={() => navigateTo(previousChapterIndex)}><ChevronsLeft size={14} /></button>
+            <button className="control-button" type="button" aria-label="Previous step" disabled={previousStepIndex < 0} onClick={() => navigateTo(previousStepIndex)}><ArrowLeft size={14} /></button>
+            <span className="architecture-nav-position">{selected ? `${selectedIndex + 1} / ${route.length}` : `— / ${route.length}`}</span>
+            <button className="control-button" type="button" aria-label="Next step" disabled={nextStepIndex < 0 && selected !== undefined} onClick={() => navigateTo(selected ? nextStepIndex : 0)}><ArrowRight size={14} /></button>
+            <button className="control-button" type="button" aria-label="Next chapter" disabled={nextChapterIndex < 0} onClick={() => navigateTo(nextChapterIndex)}><ChevronsRight size={14} /></button>
+          </div>
         </div>
       </div>
 

@@ -70,6 +70,11 @@ button { color: inherit; }
 .repository-option[data-highlighted] { background: var(--signal-soft); color: #184fbf; }
 .primary-action { width: fit-content; min-height: 42px; display: inline-flex; align-items: center; gap: 18px; padding: 0 15px; border-radius: 8px; background: var(--ink); color: white; font-size: 11px; text-decoration: none; }
 .primary-action:hover { background: var(--signal); }
+button.primary-action { border: 0; cursor: pointer; }
+.review-queue { display: grid; gap: 7px; }
+.sign-in-demo { margin-top: 26px; display: grid; gap: 8px; }
+.demo-continue span:last-child { color: var(--muted); }
+.review-queue-item { cursor: pointer; text-align: left; }
 .review-start { width: min(100%, 460px); }
 .review-start .launcher-mark { margin-bottom: 34px; }
 .review-start .commit-pill { display: block; width: fit-content; margin: -14px 0 24px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--muted); font: 8px "IBM Plex Mono", monospace; }
@@ -123,6 +128,8 @@ button { color: inherit; }
 .begin-review:hover { background: var(--signal); }
 .review-step-card { margin: 14px 0 0 36px; padding: 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
 .step-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 20px; color: var(--muted); font: 8px "IBM Plex Mono", monospace; text-transform: uppercase; letter-spacing: .05em; }
+.step-back { display: inline-flex; align-items: center; gap: 5px; padding: 4px 7px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--muted); font: inherit; text-transform: inherit; letter-spacing: inherit; cursor: pointer; }
+.step-back:hover { border-color: #aeb4ac; color: var(--ink); }
 .step-status { display: flex; align-items: center; gap: 5px; }
 .step-status i { width: 5px; height: 5px; border-radius: 50%; background: var(--warning); }
 .step-status.status-reviewed { color: var(--verified); }
@@ -211,7 +218,10 @@ button { color: inherit; }
 .architecture-view-heading > div:first-child > span { color: var(--quiet); font: 7px "IBM Plex Mono", monospace; text-transform: uppercase; letter-spacing: .07em; }
 .architecture-view-heading strong { display: block; margin-top: 3px; font-size: 12px; font-weight: 600; }
 .architecture-view-heading p { margin: 4px 0 0; color: var(--muted); font-size: 9px; line-height: 1.4; }
+.architecture-toolbar { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 7px; }
 .architecture-scope { flex: none; display: flex; border: 1px solid #aaa79f; background: rgba(255,255,253,.95); box-shadow: 2px 2px 0 rgba(169,163,153,.25); pointer-events: auto; }
+.architecture-nav { flex: none; display: flex; align-items: center; gap: 2px; padding: 2px 5px; border: 1px solid #aaa79f; background: rgba(255,255,253,.95); box-shadow: 2px 2px 0 rgba(169,163,153,.25); pointer-events: auto; }
+.architecture-nav-position { min-width: 44px; color: var(--muted); font: 8px "IBM Plex Mono", monospace; text-align: center; white-space: nowrap; }
 .architecture-scope button { min-height: 30px; padding: 0 9px; border: 0; background: transparent; color: var(--muted); font: 7px "IBM Plex Mono", monospace; cursor: pointer; white-space: nowrap; }
 .architecture-scope button + button { border-left: 1px solid #d2cec5; }
 .architecture-scope button:hover { background: #efede7; color: var(--ink); }

@@ -15,6 +15,7 @@ export interface ReviewStep {
   reason: string;
   evidence: ReviewEvidence[];
   line?: number;
+  endLine?: number;
   side?: "LEFT" | "RIGHT";
   patch?: string;
   status: ReviewStepStatus;
@@ -179,6 +180,10 @@ export function validateReviewPlan(
       }
       if (step.line !== undefined && (!Number.isInteger(step.line) || step.line < 1)) {
         errors.push(`Chapter ${chapter.id} step ${step.fileId} has an invalid diff line.`);
+      }
+      if (step.endLine !== undefined
+        && (!Number.isInteger(step.endLine) || step.line === undefined || step.endLine < step.line)) {
+        errors.push(`Chapter ${chapter.id} step ${step.fileId} has an invalid diff line range.`);
       }
       if (step.side !== undefined && step.side !== "LEFT" && step.side !== "RIGHT") {
         errors.push(`Chapter ${chapter.id} step ${step.fileId} has an invalid diff side.`);

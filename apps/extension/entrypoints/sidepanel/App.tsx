@@ -92,13 +92,16 @@ async function navigateGitHubDiff(
   headSha: string,
   line?: number,
   side: "LEFT" | "RIGHT" = "RIGHT",
+  endLine?: number,
 ): Promise<boolean> {
   const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
   if (tab?.id === undefined || !tab.url) return false;
   const message = line
     ? {
         type: "primer:navigate-anchor" as const,
-        anchor: { path, headSha, line, side },
+        anchor: endLine && endLine > line
+          ? { path, headSha, line: endLine, side, startLine: line, startSide: side }
+          : { path, headSha, line, side },
       }
     : { type: "primer:navigate-file" as const, path };
   try {
@@ -500,6 +503,7 @@ function LiveReview({ context, panelView }: {
                 plan.headSha,
                 next.step.line,
                 next.step.side,
+                next.step.endLine,
               ).catch(() => undefined);
             }}
           />
@@ -637,6 +641,7 @@ function ReviewConversation({ context, plan, session, client, onSessionChange }:
         plan.headSha,
         next.step.line,
         next.step.side,
+        next.step.endLine,
       );
       if (!navigated) {
         setDraftFeedback({
