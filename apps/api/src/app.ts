@@ -156,18 +156,42 @@ export async function buildApp(
     async (request, reply) => mutateChapter(sessions, request.params.sessionId, request.params.chapterId, true, reply),
   );
 
-  app.post<{ Params: { sessionId: string }; Body: { message?: string } }>(
+  app.post<{
+    Params: { sessionId: string };
+    Body: {
+      message?: string;
+      activeContext?: { chapterId?: string; filePath?: string };
+    };
+  }>(
     "/api/review-sessions/:sessionId/chat/messages",
     async (request, reply) => {
       const session = await sessions.get(request.params.sessionId);
       const message = request.body?.message?.trim();
       if (!session) return reply.code(404).send({ error: "not_found" });
       if (!message) return reply.code(400).send({ error: "message_required" });
+      const requestedContext = request.body?.activeContext;
+      const activeChapter = requestedContext?.chapterId
+        ? session.artifact?.chapters.find(({ id }) => id === requestedContext.chapterId)
+        : undefined;
+      const activeFile = requestedContext?.filePath && activeChapter
+        ? activeChapter.files.find(({ path }) => path === requestedContext.filePath)
+        : undefined;
+      if (requestedContext && (!activeChapter || !activeFile)) {
+        return reply.code(409).send({ error: "invalid_review_context" });
+      }
+      const activeContext = activeChapter && activeFile
+        ? { chapterId: activeChapter.id, filePath: activeFile.path }
+        : undefined;
+      if (activeContext) session.currentChapterId = activeContext.chapterId;
       const userTurn = addChatTurn(session, { role: "user", content: message, citations: [] });
       const stateChange = applyConversationStateIntent(session, message);
       if (stateChange) addChatTurn(session, { role: "tool", content: stateChange, citations: [] });
       try {
-        const response = await chatEngine.reply({ session, message });
+        const response = await chatEngine.reply({
+          session,
+          message,
+          ...(activeContext ? { activeContext } : {}),
+        });
         const assistantTurn = addChatTurn(session, { role: "assistant", content: response.text, citations: response.citations });
         await sessions.save(session);
         return { user: userTurn, assistant: assistantTurn };

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import type { AnalyzeRequest, Analyzer, AnalyzerContext } from "@review-story/contracts";
 import { afterEach, describe, expect, it } from "vitest";
 import { buildApp } from "../src/app.js";
+import type { ActiveReviewContext, ChatEngine, ChatReply } from "../src/openai-chat.js";
 
 const apps: Awaited<ReturnType<typeof buildApp>>[] = [];
 const temporaryDirectories: string[] = [];
@@ -95,6 +96,48 @@ describe("story API", () => {
     expect(current.json().status).toBe("READY");
   });
 
+  it("grounds chat in the exact active review chapter and file", async () => {
+    const cacheDirectory = await mkdtemp(join(tmpdir(), "review-story-api-"));
+    temporaryDirectories.push(cacheDirectory);
+    const chatEngine = new ContextCapturingChatEngine();
+    const app = await buildApp({
+      analyzer: new StaticAnalyzer({ streamDelayMs: 0 }),
+      cacheDirectory,
+      chatEngine,
+    });
+    apps.push(app);
+
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/prs/acme/review-story-demo/pulls/123/review-sessions",
+      payload: { headSha: "8b7b7e55f69a26d3c249f9ddba8f1c8c26f986aa" },
+    });
+    const sessionId = created.json().id as string;
+    await app.inject({ method: "GET", url: `/api/review-sessions/${sessionId}/events` });
+    const ready = await app.inject({ method: "GET", url: `/api/review-sessions/${sessionId}` });
+    const chapter = ready.json().artifact.chapters[0] as { id: string; files: Array<{ path: string }> };
+    const activeContext = { chapterId: chapter.id, filePath: chapter.files[0]!.path };
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/review-sessions/${sessionId}/chat/messages`,
+      payload: { message: "What should I verify here?", activeContext },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(chatEngine.lastActiveContext).toEqual(activeContext);
+
+    const invalid = await app.inject({
+      method: "POST",
+      url: `/api/review-sessions/${sessionId}/chat/messages`,
+      payload: {
+        message: "What should I verify here?",
+        activeContext: { chapterId: chapter.id, filePath: "src/not-in-this-chapter.ts" },
+      },
+    });
+    expect(invalid.statusCode).toBe(409);
+  });
+
   it("deduplicates concurrent cold streams and serves the next open from cache", async () => {
     const analyzer = new CountingAnalyzer();
     const app = await testApp(analyzer);
@@ -182,5 +225,16 @@ class MismatchedIdentityAnalyzer extends CountingAnalyzer {
   override async identify(request: AnalyzeRequest, context?: AnalyzerContext) {
     const identity = await super.identify(request, context);
     return { ...identity, head_oid: "stale-head" };
+  }
+}
+
+class ContextCapturingChatEngine implements ChatEngine {
+  lastActiveContext: ActiveReviewContext | undefined;
+
+  async reply(input: {
+    activeContext?: ActiveReviewContext;
+  }): Promise<ChatReply> {
+    this.lastActiveContext = input.activeContext;
+    return { text: "Focus on the evidence for this file.", citations: [] };
   }
 }

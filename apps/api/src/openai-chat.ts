@@ -7,8 +7,17 @@ export interface ChatReply {
   responseId?: string;
 }
 
+export interface ActiveReviewContext {
+  chapterId: string;
+  filePath: string;
+}
+
 export interface ChatEngine {
-  reply(input: { session: ReviewSession; message: string }): Promise<ChatReply>;
+  reply(input: {
+    session: ReviewSession;
+    message: string;
+    activeContext?: ActiveReviewContext;
+  }): Promise<ChatReply>;
 }
 
 /**
@@ -23,9 +32,13 @@ export class OpenAiResponsesChatEngine implements ChatEngine {
     this.#apiKey = apiKey ?? process.env.OPENAI_API_KEY;
   }
 
-  async reply({ session, message }: { session: ReviewSession; message: string }): Promise<ChatReply> {
+  async reply({ session, message, activeContext }: {
+    session: ReviewSession;
+    message: string;
+    activeContext?: ActiveReviewContext;
+  }): Promise<ChatReply> {
     if (process.env.ANALYZER_MODE === "deterministic") {
-      return deterministicEvidenceReply(session, message);
+      return deterministicEvidenceReply(session, message, activeContext);
     }
     if (!this.#apiKey) {
       throw new Error("OPENAI_API_KEY is required to use chat");
@@ -37,10 +50,41 @@ export class OpenAiResponsesChatEngine implements ChatEngine {
       };
     }
 
+    const activeChapterId = activeContext?.chapterId ?? session.currentChapterId;
+    const activeChapter = session.artifact.chapters.find(({ id }) => id === activeChapterId);
+    const activeFile = activeContext && activeChapter
+      ? activeChapter.files.find(({ path }) => path === activeContext.filePath)
+      : undefined;
     const context = {
-      currentChapterId: session.currentChapterId ?? null,
+      pullRequest: {
+        owner: session.owner,
+        repo: session.repo,
+        number: session.pullNumber,
+        headSha: session.headSha,
+      },
+      overview: {
+        summary: session.artifact.exec_summary,
+        chapters: session.artifact.chapters.map((chapter) => ({
+          id: chapter.id,
+          title: chapter.title,
+          summary: chapter.summary,
+          attention: chapter.attention,
+          fileCount: chapter.files.length,
+        })),
+        omittedFileCount: session.artifact.appendix.files.length,
+      },
+      activePage: activeChapter ? {
+        chapter: {
+          id: activeChapter.id,
+          title: activeChapter.title,
+          summary: activeChapter.summary,
+          scrutinize: activeChapter.scrutinize,
+          relatedTests: activeChapter.related_tests,
+          attention: activeChapter.attention,
+        },
+        file: activeFile ?? null,
+      } : null,
       completedChapterIds: session.completedChapters.map(({ chapterId }) => chapterId),
-      artifact: session.artifact,
       history: session.chatTurns.slice(-12).map(({ role, content }) => ({ role, content })),
     };
     const response = await fetch("https://api.openai.com/v1/responses", {
@@ -65,13 +109,13 @@ export class OpenAiResponsesChatEngine implements ChatEngine {
       }),
     }).catch(() => undefined);
     if (!response?.ok) {
-      return deterministicEvidenceReply(session, message);
+      return deterministicEvidenceReply(session, message, activeContext);
     }
     const payload = await response.json() as { id?: string; output_text?: string };
     const text = payload.output_text?.trim() || "I could not produce a review response.";
     const citations = extractAndValidateCitations(text, session);
     if (!citations.length && /[.!?]/.test(text)) {
-      return deterministicEvidenceReply(session, message);
+      return deterministicEvidenceReply(session, message, activeContext);
     }
     return {
       text,
@@ -81,7 +125,11 @@ export class OpenAiResponsesChatEngine implements ChatEngine {
   }
 }
 
-function deterministicEvidenceReply(session: ReviewSession, message: string): ChatReply {
+function deterministicEvidenceReply(
+  session: ReviewSession,
+  message: string,
+  activeContext?: ActiveReviewContext,
+): ChatReply {
   const artifact = session.artifact;
   if (!artifact) {
     return {
@@ -90,14 +138,15 @@ function deterministicEvidenceReply(session: ReviewSession, message: string): Ch
     };
   }
 
-  if (/\b(intent|summary|what.*pr|what.*change)\b/i.test(message)) {
+  if (/\b(intent|overall|whole pr|pr summary|what.*pr)\b/i.test(message)) {
     return {
       text: `${artifact.exec_summary.text} ${formatCitations(artifact.exec_summary.evidence)}`,
       citations: artifact.exec_summary.evidence,
     };
   }
 
-  const current = artifact.chapters.find(({ id }) => id === session.currentChapterId);
+  const current = artifact.chapters.find(({ id }) =>
+    id === (activeContext?.chapterId ?? session.currentChapterId));
   const highestRisk = [...artifact.chapters].sort((left, right) =>
     attentionRank(right.attention.level) - attentionRank(left.attention.level))[0];
   const chapter = /\b(risk|danger|scrutinize|concern)\b/i.test(message)
@@ -109,7 +158,11 @@ function deterministicEvidenceReply(session: ReviewSession, message: string): Ch
       citations: artifact.exec_summary.evidence,
     };
   }
-  const claim = chapter.scrutinize[0] ?? chapter.summary;
+  const fileClaims = activeContext
+    ? [chapter.summary, ...chapter.scrutinize].filter((claim) =>
+      claim.evidence.some(({ path }) => path === activeContext.filePath))
+    : [];
+  const claim = fileClaims[0] ?? chapter.scrutinize[0] ?? chapter.summary;
   return {
     text: `${claim.text} ${formatCitations(claim.evidence)}`,
     citations: claim.evidence,

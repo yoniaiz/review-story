@@ -251,6 +251,65 @@ function ContextLauncher({ context }: { context: GitHubPageContext }) {
   );
 }
 
+function ReviewOverview({ context, session, plan, route, onStart }: {
+  context: GitHubPageContext;
+  session: HarnessSession & { artifact: NonNullable<HarnessSession["artifact"]> };
+  plan: ReviewPlan;
+  route: ReturnType<typeof getExtensionReviewRoute>;
+  onStart: (routeIndex: number) => void;
+}) {
+  const deepReadCount = session.artifact.chapters.filter(({ attention }) =>
+    attention.level === "DEEP_READ").length;
+
+  return (
+    <div className="overview-scroll">
+      <section className="review-overview">
+        <div className="overview-hero">
+          <p className="utility-label">{context.owner}/{context.repository} · #{context.pullNumber}</p>
+          <div className="overview-signal"><Sparkles size={16} /></div>
+          <h1>I’m ready to guide this review.</h1>
+          <p className="overview-brief">{session.artifact.exec_summary.text}</p>
+          <div className="overview-stats" aria-label="Pull request analysis summary">
+            <span><strong>{plan.stats.totalFiles}</strong> changed files</span>
+            <span><strong>{plan.stats.chapters}</strong> review chapters</span>
+            <span><strong>{deepReadCount}</strong> deep-read areas</span>
+          </div>
+          <button className="primary-action overview-start" type="button" disabled={!route.length} onClick={() => onStart(0)}>
+            Begin guided review <ArrowRight size={15} />
+          </button>
+        </div>
+
+        <div className="overview-section-heading">
+          <span>Review path</span>
+          <small>{route.length} evidence-backed steps</small>
+        </div>
+        <div className="overview-chapters">
+          {plan.chapters.map((chapter, index) => {
+            const artifactChapter = session.artifact.chapters.find(({ id }) => id === chapter.id);
+            const firstRouteIndex = route.findIndex((item) => item.chapter.id === chapter.id);
+            return (
+              <button className="overview-chapter" type="button" key={chapter.id} disabled={firstRouteIndex < 0} onClick={() => onStart(firstRouteIndex)}>
+                <span className="overview-chapter-number">{String(index + 1).padStart(2, "0")}</span>
+                <span className="overview-chapter-copy">
+                  <span className="overview-chapter-meta">
+                    {chapter.fileIds.length} files · {artifactChapter?.attention.level.replace("_", " ").toLowerCase() ?? "standard"}
+                  </span>
+                  <strong>{chapter.title}</strong>
+                  <p>{chapter.summary}</p>
+                </span>
+                <ArrowRight size={15} />
+              </button>
+            );
+          })}
+        </div>
+        {plan.stats.noiseFiles ? (
+          <p className="overview-appendix">Primer set aside {plan.stats.noiseFiles} generated or low-signal files to keep the guided path focused.</p>
+        ) : null}
+      </section>
+    </div>
+  );
+}
+
 function LiveReview({ context, panelView }: {
   context: GitHubPageContext;
   panelView: "conversation" | "architecture";
@@ -261,6 +320,8 @@ function LiveReview({ context, panelView }: {
   const [phase, setPhase] = useState<"idle" | "starting" | "generating">("idle");
   const [generationProgress, setGenerationProgress] = useState({ completed: 0, total: 0 });
   const [error, setError] = useState<string>();
+  const [reviewScreen, setReviewScreen] = useState<"overview" | "steps">("overview");
+  const [entryRouteIndex, setEntryRouteIndex] = useState(0);
   const demoIdentityMatches = context.owner === (import.meta.env.VITE_DEMO_OWNER ?? "itayfry")
     && context.repository === (import.meta.env.VITE_DEMO_REPO ?? "king-of-tokens")
     && context.pullNumber === Number(import.meta.env.VITE_DEMO_PR ?? "1");
@@ -276,6 +337,8 @@ function LiveReview({ context, panelView }: {
     setPhase("idle");
     setGenerationProgress({ completed: 0, total: 0 });
     setError(undefined);
+    setReviewScreen("overview");
+    setEntryRouteIndex(0);
   }, [reviewIdentity]);
 
   useEffect(() => () => sourceRef.current?.close(), []);
@@ -376,6 +439,21 @@ function LiveReview({ context, panelView }: {
   );
   const selectedIndex = Math.max(0, route.findIndex(({ chapter }) => chapter.id === session?.currentChapterId));
 
+  const enterGuidedReview = async (routeIndex: number) => {
+    const next = route[routeIndex];
+    if (!next || !session) return;
+    setEntryRouteIndex(routeIndex);
+    if (next.chapter.id !== session.currentChapterId) {
+      try {
+        setSession(await client.selectChapter(session.id, next.chapter.id));
+      } catch {
+        // The local route remains usable if progress persistence is unavailable.
+      }
+    }
+    setReviewScreen("steps");
+    void navigateGitHubToFile(next.file.path);
+  };
+
   if (session?.artifact && plan) {
     if (panelView === "architecture") {
       return (
@@ -397,7 +475,28 @@ function LiveReview({ context, panelView }: {
         </Suspense>
       );
     }
-    return <ReviewConversation context={context} plan={plan} session={session} client={client} onSessionChange={setSession} />;
+    if (reviewScreen === "overview") {
+      return (
+        <ReviewOverview
+          context={context}
+          session={session as HarnessSession & { artifact: NonNullable<HarnessSession["artifact"]> }}
+          plan={plan}
+          route={route}
+          onStart={(index) => void enterGuidedReview(index)}
+        />
+      );
+    }
+    return (
+      <ReviewConversation
+        context={context}
+        plan={plan}
+        session={session}
+        client={client}
+        initialSelectedIndex={entryRouteIndex}
+        onBackToOverview={() => setReviewScreen("overview")}
+        onSessionChange={setSession}
+      />
+    );
   }
 
   const busy = phase !== "idle";
@@ -419,14 +518,23 @@ function LiveReview({ context, panelView }: {
   );
 }
 
-function ReviewConversation({ context, plan, session, client, onSessionChange }: {
+function ReviewConversation({
+  context,
+  plan,
+  session,
+  client,
+  initialSelectedIndex,
+  onBackToOverview,
+  onSessionChange,
+}: {
   context: GitHubPageContext;
   plan: ReviewPlan;
   session: HarnessSession;
   client: HarnessClient;
+  initialSelectedIndex: number;
+  onBackToOverview: () => void;
   onSessionChange: (session: HarnessSession) => void;
 }) {
-  const repo = `${context.owner}/${context.repository}`;
   const activeFileName = context.activeFile?.split("/").at(-1);
   const anchor = context.activeAnchor;
   const anchorLabel = anchor
@@ -436,6 +544,7 @@ function ReviewConversation({ context, plan, session, client, onSessionChange }:
     : undefined;
   const route = useMemo(() => getExtensionReviewRoute(plan), [plan]);
   const [selectedIndex, setSelectedIndex] = useState(() => {
+    if (route[initialSelectedIndex]) return initialSelectedIndex;
     const currentChapterIndex = route.findIndex(({ chapter }) => chapter.id === session.currentChapterId);
     return currentChapterIndex >= 0 ? currentChapterIndex : 0;
   });
@@ -447,7 +556,6 @@ function ReviewConversation({ context, plan, session, client, onSessionChange }:
   const followsLatestRef = useRef(true);
   const renderedChatTurnCountRef = useRef(0);
   const observedFileRef = useRef(context.activeFile);
-  const initializedSessionRef = useRef<string | undefined>(undefined);
   const [draftFeedback, setDraftFeedback] = useState<{
     tone: "working" | "success" | "error";
     message: string;
@@ -460,20 +568,12 @@ function ReviewConversation({ context, plan, session, client, onSessionChange }:
 
   useEffect(() => {
     const currentChapterIndex = route.findIndex(({ chapter }) => chapter.id === session.currentChapterId);
-    if (currentChapterIndex >= 0) setSelectedIndex(currentChapterIndex);
+    if (currentChapterIndex >= 0) {
+      setSelectedIndex((current) => route[current]?.chapter.id === session.currentChapterId
+        ? current
+        : currentChapterIndex);
+    }
   }, [route, session.currentChapterId]);
-
-  useEffect(() => {
-    const first = route[0];
-    if (!first || session.currentChapterId || initializedSessionRef.current === session.id) return;
-    initializedSessionRef.current = session.id;
-    void client.selectChapter(session.id, first.chapter.id).then(onSessionChange).catch((selectionError: unknown) => {
-      setDraftFeedback({
-        tone: "error",
-        message: selectionError instanceof Error ? selectionError.message : "Could not start chapter one",
-      });
-    });
-  }, [client, onSessionChange, route, session.currentChapterId, session.id]);
 
   useEffect(() => {
     if (context.activeFile === observedFileRef.current) return;
@@ -544,7 +644,11 @@ function ReviewConversation({ context, plan, session, client, onSessionChange }:
       followsLatestRef.current = true;
       setDraftFeedback({ tone: "working", message: "Preparing evidence and asking Primer…" });
       try {
-        const response = await client.sendChatMessage(session.id, message);
+        const response = await client.sendChatMessage(
+          session.id,
+          message,
+          selected ? { chapterId: selected.chapter.id, filePath: selected.file.path } : undefined,
+        );
         onSessionChange({
           ...session,
           chatTurns: [...session.chatTurns, response.user, response.assistant],
@@ -614,7 +718,7 @@ function ReviewConversation({ context, plan, session, client, onSessionChange }:
   return (
     <>
       <div
-        className="conversation"
+        className="conversation step-conversation"
         ref={conversationRef}
         role="log"
         aria-label="Review conversation"
@@ -624,66 +728,47 @@ function ReviewConversation({ context, plan, session, client, onSessionChange }:
           followsLatestRef.current = isNearScrollEnd(event.currentTarget);
         }}
       >
-        <div className="opening-space" aria-hidden="true" />
-        <article className="agent-turn">
-          <div className="trace" aria-hidden="true"><span /></div>
-          <div className="agent-copy">
-            <p className="agent-name"><Sparkles size={13} /> Primer</p>
-            <h1>I’m ready to guide this review.</h1>
-            <p>
-              I found <strong>{repo}#{context.pullNumber}</strong>.
-              {plan
-                ? ` I loaded ${route.length} evidence-backed steps across ${plan.chapters.length} chapters and will follow the diff as you scroll.`
-                : " I’ll follow the diff as you scroll and keep the review tied to the visible code."}
-            </p>
-          </div>
-        </article>
-
-        <section className={`context-card ${context.activeFile ? "is-live" : ""}`}>
-          <div className="context-card-heading">
-            <span><FileCode2 size={14} /> Live GitHub context</span>
-            <span className="live-signal"><i /> {context.activeFile ? "Following" : "Waiting"}</span>
-          </div>
-          {context.activeFile ? (
-            <>
-              <strong>{activeFileName}</strong>
-              <code>{context.activeFile}</code>
-              {anchor ? (
-                <div className="anchor-detail">
-                  <span>{anchorLabel}</span>
-                  <code>{anchor.headSha.slice(0, 7)}</code>
-                  {anchor.selectedText ? <p>“{anchor.selectedText}”</p> : null}
-                </div>
-              ) : null}
-              <p>{anchor
-                ? "Your next question or command will stay tied to this exact diff position."
-                : "I’ll use this file as context. Select a diff line to create an exact anchor."}</p>
-            </>
-          ) : (
-            <p>Open the Files changed tab or scroll to a diff and I’ll follow the active file.</p>
-          )}
-        </section>
-
         {selected ? (
-          <section className="review-step-card">
-            <div className="step-heading">
-              <span>Chapter {chapterNumber} · Step {selectedIndex + 1}/{route.length}</span>
+          <section className="focus-step-card">
+            <button className="overview-back" type="button" onClick={onBackToOverview}>
+              <ArrowLeft size={13} /> PR summary
+            </button>
+            <div className="focus-step-meta">
+              <span>Chapter {chapterNumber} · Step {selectedIndex + 1} of {route.length}</span>
               <span className={`step-status status-${selectedStatus}`}><i /> {selectedStatus}</span>
             </div>
-            <strong>{selected.file.path.split("/").at(-1)}</strong>
-            <p>{selected.step.reason}</p>
-            <div className="evidence-list">
-              {selected.step.evidence.slice(0, 3).map((evidence, index) => (
-                <div className="evidence-row" key={`${evidence.kind}-${index}`}>
-                  <span>{evidence.kind.replace("-", " ")}</span>
-                  <p>{evidence.description}</p>
-                </div>
-              ))}
+            <h1>{selected.file.path.split("/").at(-1)}</h1>
+            <code className="focus-file-path">{selected.file.path}</code>
+            <p className="focus-step-summary">{selected.step.reason}</p>
+            <div className={`focus-live-context ${context.activeFile === selected.file.path ? "is-aligned" : ""}`}>
+              <FileCode2 size={13} />
+              <span>{context.activeFile === selected.file.path
+                ? "GitHub is aligned to this file"
+                : context.activeFile
+                  ? `GitHub is currently on ${activeFileName}`
+                  : "Waiting for the GitHub diff"}</span>
+              {anchor?.path === selected.file.path ? <code>{anchorLabel}</code> : null}
             </div>
+            {selected.step.evidence.length ? (
+              <div className="focus-evidence">
+                <span className="focus-section-label">What to verify</span>
+                {selected.step.evidence.slice(0, 2).map((evidence, index) => (
+                  <div className="focus-evidence-row" key={`${evidence.kind}-${index}`}>
+                    <i />
+                    <p>{evidence.description}</p>
+                  </div>
+                ))}
+              </div>
+            ) : null}
           </section>
         ) : null}
 
-        {session.chatTurns.map((turn) => (
+        <div className="chat-section-heading">
+          <span>Ask about this step</span>
+          <small>{selected?.file.path.split("/").at(-1)}</small>
+        </div>
+
+        {session.chatTurns.filter((turn) => turn.role !== "tool").slice(-8).map((turn) => (
           <article className={`chat-turn chat-turn-${turn.role}`} key={turn.id}>
             <p className="chat-turn-author">
               {turn.role === "assistant" ? <><Sparkles size={12} /> Primer</> : "You"}
@@ -701,10 +786,10 @@ function ReviewConversation({ context, plan, session, client, onSessionChange }:
           </article>
         ))}
 
-        <div className="suggestions" aria-label="Suggested prompts">
-          <button type="button" onClick={() => setComposerValue("Explain the intent of this PR")}>Explain the intent of this PR</button>
-          <button type="button" onClick={() => setComposerValue("Show the highest-risk decision")}>Show the highest-risk decision</button>
-          <button type="button" onClick={() => setComposerValue("/evidence for this file")}>/evidence for this file</button>
+        <div className="suggestions step-suggestions" aria-label="Suggested prompts">
+          <button type="button" onClick={() => setComposerValue("Explain this file’s role in the chapter")}>Explain this file’s role</button>
+          <button type="button" onClick={() => setComposerValue("What should I verify in this file?")}>What should I verify?</button>
+          <button type="button" onClick={() => setComposerValue("Show the strongest evidence for this step")}>Show step evidence</button>
         </div>
       </div>
 
@@ -737,7 +822,7 @@ function ReviewConversation({ context, plan, session, client, onSessionChange }:
             onKeyDown={submitOnEnter}
           />
           <div className="composer-footer">
-            <span><MessageSquareText size={13} /> /comment</span>
+            <span><MessageSquareText size={13} /> {selected?.file.path.split("/").at(-1) ?? "Current step"}</span>
             <button type="submit" aria-label="Send message" disabled={!composerValue.trim() || draftFeedback?.tone === "working"}><Send size={15} /></button>
           </div>
         </form>
