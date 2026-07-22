@@ -72,7 +72,8 @@ button { color: inherit; }
 .primary-action:hover { background: var(--signal); }
 button.primary-action { border: 0; cursor: pointer; }
 .review-queue { display: grid; gap: 7px; }
-.review-queue-header { display: flex; align-items: center; justify-content: space-between; }
+.review-queue-header { display: flex; align-items: center; justify-content: space-between; margin: 0 0 7px; }
+.review-queue-header label { color: var(--muted); font: 8px "IBM Plex Mono", monospace; text-transform: uppercase; letter-spacing: .07em; }
 .review-queue-refresh { display: inline-flex; align-items: center; padding: 2px; border: 0; background: none; color: var(--muted); cursor: pointer; }
 .review-queue-refresh:hover:not(:disabled) { color: var(--ink); }
 .review-queue-refresh:disabled { cursor: default; }
