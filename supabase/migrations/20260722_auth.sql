@@ -30,3 +30,13 @@ create table if not exists oauth_states (
 );
 
 alter table review_sessions add column if not exists user_id uuid references harness_users(id);
+
+-- Lock every harness table away from Supabase's semi-public anon key. The API
+-- uses the service-role key, which bypasses RLS; no policies are needed.
+alter table harness_users enable row level security;
+alter table harness_sessions enable row level security;
+alter table oauth_states enable row level security;
+alter table review_sessions enable row level security;
+alter table chat_turns enable row level security;
+alter table chapter_progress enable row level security;
+alter table comment_drafts enable row level security;
