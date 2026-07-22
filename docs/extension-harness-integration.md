@@ -8,10 +8,9 @@ Add these build-time variables to the extension's environment type and local `.e
 
 ```dotenv
 VITE_DEMO_HEAD_SHA=<current PR head SHA>
-VITE_HARNESS_ACCESS_TOKEN=<same value as HARNESS_ACCESS_TOKEN, if enabled>
 ```
 
-The access token is a single-user protection mechanism. It may be sent as a bearer token on normal requests and as the `access_token` query parameter on the SSE URL because `EventSource` cannot set request headers.
+The harness session token (obtained via GitHub sign-in) is sent as a bearer token on normal requests and as the `access_token` query parameter on the SSE URL because `EventSource` cannot set request headers.
 
 ## Start and resume a review
 
