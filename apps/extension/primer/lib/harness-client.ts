@@ -44,6 +44,11 @@ export interface HarnessConfig {
   accessToken?: string;
 }
 
+export interface HarnessActiveReviewContext {
+  chapterId: string;
+  filePath: string;
+}
+
 export class HarnessClient {
   readonly #config: HarnessConfig;
 
@@ -81,13 +86,17 @@ export class HarnessClient {
     );
   }
 
-  async sendChatMessage(sessionId: string, message: string): Promise<{
+  async sendChatMessage(
+    sessionId: string,
+    message: string,
+    activeContext?: HarnessActiveReviewContext,
+  ): Promise<{
     user: HarnessChatTurn;
     assistant: HarnessChatTurn;
   }> {
     return this.#request(`/api/review-sessions/${segment(sessionId)}/chat/messages`, {
       method: "POST",
-      body: JSON.stringify({ message }),
+      body: JSON.stringify({ message, ...(activeContext ? { activeContext } : {}) }),
     });
   }
 

@@ -97,6 +97,27 @@ function getInitialContext(): GitHubPageContext {
   return getPageContext("");
 }
 
+async function navigateGitHubToFile(path: string): Promise<void> {
+  if (new URLSearchParams(window.location.search).has("preview")) return;
+  const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+  if (tab?.id === undefined) return;
+
+  const scrolled = await browser.tabs.sendMessage(tab.id, {
+    type: "primer:navigate-file",
+    path,
+  }).then((result) => result === true).catch(() => false);
+  if (scrolled || !tab.url) return;
+
+  // GitHub's stable file anchor is `diff-${sha256(path)}`. Updating the active
+  // tab fragment gives navigation a reliable fallback when the content script
+  // was not injected into an already-open PR tab.
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(path));
+  const hash = [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  const destination = new URL(tab.url);
+  destination.hash = `diff-${hash}`;
+  await browser.tabs.update(tab.id, { url: destination.href });
+}
+
 function IconButton({ label, children, onClick, pressed }: { label: string; children: ReactNode; onClick?: () => void; pressed?: boolean }) {
   return (
     <Tooltip.Root>
@@ -230,6 +251,65 @@ function ContextLauncher({ context }: { context: GitHubPageContext }) {
   );
 }
 
+function ReviewOverview({ context, session, plan, route, onStart }: {
+  context: GitHubPageContext;
+  session: HarnessSession & { artifact: NonNullable<HarnessSession["artifact"]> };
+  plan: ReviewPlan;
+  route: ReturnType<typeof getExtensionReviewRoute>;
+  onStart: (routeIndex: number) => void;
+}) {
+  const deepReadCount = session.artifact.chapters.filter(({ attention }) =>
+    attention.level === "DEEP_READ").length;
+
+  return (
+    <div className="overview-scroll">
+      <section className="review-overview">
+        <div className="overview-hero">
+          <p className="utility-label">{context.owner}/{context.repository} · #{context.pullNumber}</p>
+          <div className="overview-signal"><Sparkles size={16} /></div>
+          <h1>I’m ready to guide this review.</h1>
+          <p className="overview-brief">{session.artifact.exec_summary.text}</p>
+          <div className="overview-stats" aria-label="Pull request analysis summary">
+            <span><strong>{plan.stats.totalFiles}</strong> changed files</span>
+            <span><strong>{plan.stats.chapters}</strong> review chapters</span>
+            <span><strong>{deepReadCount}</strong> deep-read areas</span>
+          </div>
+          <button className="primary-action overview-start" type="button" disabled={!route.length} onClick={() => onStart(0)}>
+            Begin guided review <ArrowRight size={15} />
+          </button>
+        </div>
+
+        <div className="overview-section-heading">
+          <span>Review path</span>
+          <small>{route.length} evidence-backed steps</small>
+        </div>
+        <div className="overview-chapters">
+          {plan.chapters.map((chapter, index) => {
+            const artifactChapter = session.artifact.chapters.find(({ id }) => id === chapter.id);
+            const firstRouteIndex = route.findIndex((item) => item.chapter.id === chapter.id);
+            return (
+              <button className="overview-chapter" type="button" key={chapter.id} disabled={firstRouteIndex < 0} onClick={() => onStart(firstRouteIndex)}>
+                <span className="overview-chapter-number">{String(index + 1).padStart(2, "0")}</span>
+                <span className="overview-chapter-copy">
+                  <span className="overview-chapter-meta">
+                    {chapter.fileIds.length} files · {artifactChapter?.attention.level.replace("_", " ").toLowerCase() ?? "standard"}
+                  </span>
+                  <strong>{chapter.title}</strong>
+                  <p>{chapter.summary}</p>
+                </span>
+                <ArrowRight size={15} />
+              </button>
+            );
+          })}
+        </div>
+        {plan.stats.noiseFiles ? (
+          <p className="overview-appendix">Primer set aside {plan.stats.noiseFiles} generated or low-signal files to keep the guided path focused.</p>
+        ) : null}
+      </section>
+    </div>
+  );
+}
+
 function LiveReview({ context, panelView }: {
   context: GitHubPageContext;
   panelView: "conversation" | "architecture";
@@ -240,6 +320,8 @@ function LiveReview({ context, panelView }: {
   const [phase, setPhase] = useState<"idle" | "starting" | "generating">("idle");
   const [generationProgress, setGenerationProgress] = useState({ completed: 0, total: 0 });
   const [error, setError] = useState<string>();
+  const [reviewScreen, setReviewScreen] = useState<"overview" | "steps">("overview");
+  const [entryRouteIndex, setEntryRouteIndex] = useState(0);
   const demoIdentityMatches = context.owner === (import.meta.env.VITE_DEMO_OWNER ?? "itayfry")
     && context.repository === (import.meta.env.VITE_DEMO_REPO ?? "king-of-tokens")
     && context.pullNumber === Number(import.meta.env.VITE_DEMO_PR ?? "1");
@@ -255,6 +337,8 @@ function LiveReview({ context, panelView }: {
     setPhase("idle");
     setGenerationProgress({ completed: 0, total: 0 });
     setError(undefined);
+    setReviewScreen("overview");
+    setEntryRouteIndex(0);
   }, [reviewIdentity]);
 
   useEffect(() => () => sourceRef.current?.close(), []);
@@ -270,6 +354,7 @@ function LiveReview({ context, panelView }: {
       try {
         const parsed = StoryStreamEventSchema.parse(JSON.parse(raw.data));
         if (parsed.type === "story.skeleton") {
+          setError(undefined);
           setGenerationProgress({ completed: 0, total: parsed.data.chapters.length });
           setSession((current) => current ? { ...current, status: "GENERATING", skeleton: parsed.data } : current);
         }
@@ -308,9 +393,10 @@ function LiveReview({ context, panelView }: {
     }
     source.onerror = () => {
       if (settled) return;
-      source.close();
-      setError(`Could not reach the review harness at ${harnessConfig.apiBaseUrl}.`);
-      setPhase("idle");
+      // EventSource reconnects automatically. A transient SSE close is expected
+      // during local dev reloads and must not turn a healthy stored generation
+      // into a terminal connection error.
+      setPhase("generating");
     };
   };
 
@@ -353,6 +439,21 @@ function LiveReview({ context, panelView }: {
   );
   const selectedIndex = Math.max(0, route.findIndex(({ chapter }) => chapter.id === session?.currentChapterId));
 
+  const enterGuidedReview = async (routeIndex: number) => {
+    const next = route[routeIndex];
+    if (!next || !session) return;
+    setEntryRouteIndex(routeIndex);
+    if (next.chapter.id !== session.currentChapterId) {
+      try {
+        setSession(await client.selectChapter(session.id, next.chapter.id));
+      } catch {
+        // The local route remains usable if progress persistence is unavailable.
+      }
+    }
+    setReviewScreen("steps");
+    void navigateGitHubToFile(next.file.path);
+  };
+
   if (session?.artifact && plan) {
     if (panelView === "architecture") {
       return (
@@ -368,16 +469,34 @@ function LiveReview({ context, panelView }: {
               if (next.chapter.id !== session.currentChapterId) {
                 void client.selectChapter(session.id, next.chapter.id).then(setSession).catch(() => undefined);
               }
-              if (new URLSearchParams(window.location.search).has("preview")) return;
-              void browser.tabs.query({ active: true, currentWindow: true }).then(([tab]) => tab?.id === undefined
-                ? undefined
-                : browser.tabs.sendMessage(tab.id, { type: "primer:navigate-file", path: next.file.path })).catch(() => undefined);
+              void navigateGitHubToFile(next.file.path);
             }}
           />
         </Suspense>
       );
     }
-    return <ReviewConversation context={context} plan={plan} session={session} client={client} onSessionChange={setSession} />;
+    if (reviewScreen === "overview") {
+      return (
+        <ReviewOverview
+          context={context}
+          session={session as HarnessSession & { artifact: NonNullable<HarnessSession["artifact"]> }}
+          plan={plan}
+          route={route}
+          onStart={(index) => void enterGuidedReview(index)}
+        />
+      );
+    }
+    return (
+      <ReviewConversation
+        context={context}
+        plan={plan}
+        session={session}
+        client={client}
+        initialSelectedIndex={entryRouteIndex}
+        onBackToOverview={() => setReviewScreen("overview")}
+        onSessionChange={setSession}
+      />
+    );
   }
 
   const busy = phase !== "idle";
@@ -399,14 +518,23 @@ function LiveReview({ context, panelView }: {
   );
 }
 
-function ReviewConversation({ context, plan, session, client, onSessionChange }: {
+function ReviewConversation({
+  context,
+  plan,
+  session,
+  client,
+  initialSelectedIndex,
+  onBackToOverview,
+  onSessionChange,
+}: {
   context: GitHubPageContext;
   plan: ReviewPlan;
   session: HarnessSession;
   client: HarnessClient;
+  initialSelectedIndex: number;
+  onBackToOverview: () => void;
   onSessionChange: (session: HarnessSession) => void;
 }) {
-  const repo = `${context.owner}/${context.repository}`;
   const activeFileName = context.activeFile?.split("/").at(-1);
   const anchor = context.activeAnchor;
   const anchorLabel = anchor
@@ -416,6 +544,7 @@ function ReviewConversation({ context, plan, session, client, onSessionChange }:
     : undefined;
   const route = useMemo(() => getExtensionReviewRoute(plan), [plan]);
   const [selectedIndex, setSelectedIndex] = useState(() => {
+    if (route[initialSelectedIndex]) return initialSelectedIndex;
     const currentChapterIndex = route.findIndex(({ chapter }) => chapter.id === session.currentChapterId);
     return currentChapterIndex >= 0 ? currentChapterIndex : 0;
   });
@@ -427,32 +556,24 @@ function ReviewConversation({ context, plan, session, client, onSessionChange }:
   const followsLatestRef = useRef(true);
   const renderedChatTurnCountRef = useRef(0);
   const observedFileRef = useRef(context.activeFile);
-  const initializedSessionRef = useRef<string | undefined>(undefined);
   const [draftFeedback, setDraftFeedback] = useState<{
     tone: "working" | "success" | "error";
     message: string;
   }>();
   const selected = route[selectedIndex];
+  const selectedFilePath = selected?.file.path;
   const selectedStatus = selected ? statuses[selected.step.fileId] ?? selected.step.status : "pending";
   const severity = selected?.file.severity ?? "standard";
   const chapterNumber = selected ? plan.chapters.indexOf(selected.chapter) + 1 : 0;
 
   useEffect(() => {
     const currentChapterIndex = route.findIndex(({ chapter }) => chapter.id === session.currentChapterId);
-    if (currentChapterIndex >= 0) setSelectedIndex(currentChapterIndex);
+    if (currentChapterIndex >= 0) {
+      setSelectedIndex((current) => route[current]?.chapter.id === session.currentChapterId
+        ? current
+        : currentChapterIndex);
+    }
   }, [route, session.currentChapterId]);
-
-  useEffect(() => {
-    const first = route[0];
-    if (!first || session.currentChapterId || initializedSessionRef.current === session.id) return;
-    initializedSessionRef.current = session.id;
-    void client.selectChapter(session.id, first.chapter.id).then(onSessionChange).catch((selectionError: unknown) => {
-      setDraftFeedback({
-        tone: "error",
-        message: selectionError instanceof Error ? selectionError.message : "Could not start chapter one",
-      });
-    });
-  }, [client, onSessionChange, route, session.currentChapterId, session.id]);
 
   useEffect(() => {
     if (context.activeFile === observedFileRef.current) return;
@@ -460,6 +581,15 @@ function ReviewConversation({ context, plan, session, client, onSessionChange }:
     const visibleIndex = findRouteIndexByPath(route, context.activeFile);
     if (visibleIndex >= 0) setSelectedIndex(visibleIndex);
   }, [context.activeFile, route]);
+
+  useEffect(() => {
+    if (!selectedFilePath || context.activeFile === selectedFilePath) return;
+    void navigateGitHubToFile(selectedFilePath);
+    // Only a side-panel route change should initiate GitHub navigation. When
+    // GitHub scrolling changes activeFile, the effect above first selects its
+    // matching route and this effect then sees both files already aligned.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedFilePath]);
 
   useEffect(() => {
     const previousCount = renderedChatTurnCountRef.current;
@@ -489,13 +619,6 @@ function ReviewConversation({ context, plan, session, client, onSessionChange }:
         });
       }
     }
-    if (new URLSearchParams(window.location.search).has("preview")) return;
-    void browser.tabs.query({ active: true, currentWindow: true }).then(([tab]) => {
-      if (tab?.id !== undefined) {
-        return browser.tabs.sendMessage(tab.id, { type: "primer:navigate-file", path: next.file.path });
-      }
-      return undefined;
-    }).catch(() => undefined);
   };
 
   const completeSelected = async () => {
@@ -521,7 +644,11 @@ function ReviewConversation({ context, plan, session, client, onSessionChange }:
       followsLatestRef.current = true;
       setDraftFeedback({ tone: "working", message: "Preparing evidence and asking Primer…" });
       try {
-        const response = await client.sendChatMessage(session.id, message);
+        const response = await client.sendChatMessage(
+          session.id,
+          message,
+          selected ? { chapterId: selected.chapter.id, filePath: selected.file.path } : undefined,
+        );
         onSessionChange({
           ...session,
           chatTurns: [...session.chatTurns, response.user, response.assistant],
@@ -591,7 +718,7 @@ function ReviewConversation({ context, plan, session, client, onSessionChange }:
   return (
     <>
       <div
-        className="conversation"
+        className="conversation step-conversation"
         ref={conversationRef}
         role="log"
         aria-label="Review conversation"
@@ -601,66 +728,47 @@ function ReviewConversation({ context, plan, session, client, onSessionChange }:
           followsLatestRef.current = isNearScrollEnd(event.currentTarget);
         }}
       >
-        <div className="opening-space" aria-hidden="true" />
-        <article className="agent-turn">
-          <div className="trace" aria-hidden="true"><span /></div>
-          <div className="agent-copy">
-            <p className="agent-name"><Sparkles size={13} /> Primer</p>
-            <h1>I’m ready to guide this review.</h1>
-            <p>
-              I found <strong>{repo}#{context.pullNumber}</strong>.
-              {plan
-                ? ` I loaded ${route.length} evidence-backed steps across ${plan.chapters.length} chapters and will follow the diff as you scroll.`
-                : " I’ll follow the diff as you scroll and keep the review tied to the visible code."}
-            </p>
-          </div>
-        </article>
-
-        <section className={`context-card ${context.activeFile ? "is-live" : ""}`}>
-          <div className="context-card-heading">
-            <span><FileCode2 size={14} /> Live GitHub context</span>
-            <span className="live-signal"><i /> {context.activeFile ? "Following" : "Waiting"}</span>
-          </div>
-          {context.activeFile ? (
-            <>
-              <strong>{activeFileName}</strong>
-              <code>{context.activeFile}</code>
-              {anchor ? (
-                <div className="anchor-detail">
-                  <span>{anchorLabel}</span>
-                  <code>{anchor.headSha.slice(0, 7)}</code>
-                  {anchor.selectedText ? <p>“{anchor.selectedText}”</p> : null}
-                </div>
-              ) : null}
-              <p>{anchor
-                ? "Your next question or command will stay tied to this exact diff position."
-                : "I’ll use this file as context. Select a diff line to create an exact anchor."}</p>
-            </>
-          ) : (
-            <p>Open the Files changed tab or scroll to a diff and I’ll follow the active file.</p>
-          )}
-        </section>
-
         {selected ? (
-          <section className="review-step-card">
-            <div className="step-heading">
-              <span>Chapter {chapterNumber} · Step {selectedIndex + 1}/{route.length}</span>
+          <section className="focus-step-card">
+            <button className="overview-back" type="button" onClick={onBackToOverview}>
+              <ArrowLeft size={13} /> PR summary
+            </button>
+            <div className="focus-step-meta">
+              <span>Chapter {chapterNumber} · Step {selectedIndex + 1} of {route.length}</span>
               <span className={`step-status status-${selectedStatus}`}><i /> {selectedStatus}</span>
             </div>
-            <strong>{selected.file.path.split("/").at(-1)}</strong>
-            <p>{selected.step.reason}</p>
-            <div className="evidence-list">
-              {selected.step.evidence.slice(0, 3).map((evidence, index) => (
-                <div className="evidence-row" key={`${evidence.kind}-${index}`}>
-                  <span>{evidence.kind.replace("-", " ")}</span>
-                  <p>{evidence.description}</p>
-                </div>
-              ))}
+            <h1>{selected.file.path.split("/").at(-1)}</h1>
+            <code className="focus-file-path">{selected.file.path}</code>
+            <p className="focus-step-summary">{selected.step.reason}</p>
+            <div className={`focus-live-context ${context.activeFile === selected.file.path ? "is-aligned" : ""}`}>
+              <FileCode2 size={13} />
+              <span>{context.activeFile === selected.file.path
+                ? "GitHub is aligned to this file"
+                : context.activeFile
+                  ? `GitHub is currently on ${activeFileName}`
+                  : "Waiting for the GitHub diff"}</span>
+              {anchor?.path === selected.file.path ? <code>{anchorLabel}</code> : null}
             </div>
+            {selected.step.evidence.length ? (
+              <div className="focus-evidence">
+                <span className="focus-section-label">What to verify</span>
+                {selected.step.evidence.slice(0, 2).map((evidence, index) => (
+                  <div className="focus-evidence-row" key={`${evidence.kind}-${index}`}>
+                    <i />
+                    <p>{evidence.description}</p>
+                  </div>
+                ))}
+              </div>
+            ) : null}
           </section>
         ) : null}
 
-        {session.chatTurns.map((turn) => (
+        <div className="chat-section-heading">
+          <span>Ask about this step</span>
+          <small>{selected?.file.path.split("/").at(-1)}</small>
+        </div>
+
+        {session.chatTurns.filter((turn) => turn.role !== "tool").slice(-8).map((turn) => (
           <article className={`chat-turn chat-turn-${turn.role}`} key={turn.id}>
             <p className="chat-turn-author">
               {turn.role === "assistant" ? <><Sparkles size={12} /> Primer</> : "You"}
@@ -678,10 +786,10 @@ function ReviewConversation({ context, plan, session, client, onSessionChange }:
           </article>
         ))}
 
-        <div className="suggestions" aria-label="Suggested prompts">
-          <button type="button" onClick={() => setComposerValue("Explain the intent of this PR")}>Explain the intent of this PR</button>
-          <button type="button" onClick={() => setComposerValue("Show the highest-risk decision")}>Show the highest-risk decision</button>
-          <button type="button" onClick={() => setComposerValue("/evidence for this file")}>/evidence for this file</button>
+        <div className="suggestions step-suggestions" aria-label="Suggested prompts">
+          <button type="button" onClick={() => setComposerValue("Explain this file’s role in the chapter")}>Explain this file’s role</button>
+          <button type="button" onClick={() => setComposerValue("What should I verify in this file?")}>What should I verify?</button>
+          <button type="button" onClick={() => setComposerValue("Show the strongest evidence for this step")}>Show step evidence</button>
         </div>
       </div>
 
@@ -714,7 +822,7 @@ function ReviewConversation({ context, plan, session, client, onSessionChange }:
             onKeyDown={submitOnEnter}
           />
           <div className="composer-footer">
-            <span><MessageSquareText size={13} /> /comment</span>
+            <span><MessageSquareText size={13} /> {selected?.file.path.split("/").at(-1) ?? "Current step"}</span>
             <button type="submit" aria-label="Send message" disabled={!composerValue.trim() || draftFeedback?.tone === "working"}><Send size={15} /></button>
           </div>
         </form>
@@ -736,18 +844,47 @@ export function App() {
   useEffect(() => {
     if (new URLSearchParams(window.location.search).has("preview")) return undefined;
 
-    void browser.runtime.sendMessage({ type: "primer:get-active-context" }).then((next) => {
-      if (next && typeof next === "object" && "kind" in next) setContext(next as GitHubPageContext);
-    });
+    const refreshActiveContext = async () => {
+      const next = await browser.runtime.sendMessage({ type: "primer:get-active-context" }).catch(() => undefined);
+      if (next && typeof next === "object" && "kind" in next) {
+        const observed = next as GitHubPageContext;
+        if (observed.kind === "pull-request") {
+          setContext(observed);
+          return;
+        }
+      }
+
+      // A freshly reloaded unpacked extension may not yet have a content script
+      // in an already-open GitHub tab. The active tab URL is still authoritative
+      // enough to identify the PR and expose the Start Analyze action.
+      const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+      const fromActiveTab = getPageContext(tab?.url ?? "");
+      if (fromActiveTab.kind === "pull-request") setContext(fromActiveTab);
+      else if (next && typeof next === "object" && "kind" in next) setContext(next as GitHubPageContext);
+    };
+
+    void refreshActiveContext();
 
     const listener = (message: unknown) => {
       if (!isPrimerExtensionMessage(message)) return undefined;
-      if (message.type === "primer:active-context-changed") setContext(message.context);
-      if (message.type === "primer:context-observed") setContext(message.context);
+      if (message.type === "primer:active-context-changed" || message.type === "primer:context-observed") {
+        if (message.context.kind === "pull-request") setContext(message.context);
+        else void refreshActiveContext();
+      }
       return undefined;
     };
     browser.runtime.onMessage.addListener(listener);
-    return () => browser.runtime.onMessage.removeListener(listener);
+    const onActivated = () => void refreshActiveContext();
+    const onUpdated = (_tabId: number, change: { status?: string; url?: string }) => {
+      if (change.url || change.status === "complete") void refreshActiveContext();
+    };
+    browser.tabs.onActivated.addListener(onActivated);
+    browser.tabs.onUpdated.addListener(onUpdated);
+    return () => {
+      browser.runtime.onMessage.removeListener(listener);
+      browser.tabs.onActivated.removeListener(onActivated);
+      browser.tabs.onUpdated.removeListener(onUpdated);
+    };
   }, []);
 
   return (

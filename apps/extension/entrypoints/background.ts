@@ -8,15 +8,48 @@ import {
 } from "../primer/lib/extension-context";
 
 const contextByTab = new Map<number, GitHubPageContext>();
+const contentScriptInjectionByTab = new Map<number, Promise<boolean>>();
+
+async function ensureContentScript(tabId: number, url: string): Promise<boolean> {
+  if (getPageContext(url).kind === "outside-github") return false;
+
+  const pending = contentScriptInjectionByTab.get(tabId);
+  if (pending) return pending;
+
+  const injection = browser.scripting.executeScript({
+    target: { tabId },
+    files: ["/content-scripts/content.js"],
+  }).then(() => true).catch(() => false).finally(() => {
+    contentScriptInjectionByTab.delete(tabId);
+  });
+  contentScriptInjectionByTab.set(tabId, injection);
+  return injection;
+}
+
+async function readTabContext(tabId: number): Promise<GitHubPageContext | undefined> {
+  const context = await browser.tabs.sendMessage(tabId, { type: "primer:request-context" });
+  if (context && typeof context === "object" && "kind" in context) {
+    return context as GitHubPageContext;
+  }
+  return undefined;
+}
 
 async function requestTabContext(tabId: number, fallbackUrl = ""): Promise<GitHubPageContext> {
   try {
-    const context = await browser.tabs.sendMessage(tabId, { type: "primer:request-context" });
-    if (context && typeof context === "object" && "kind" in context) {
-      return context as GitHubPageContext;
-    }
+    const context = await readTabContext(tabId);
+    if (context) return context;
   } catch {
-    // Content scripts are intentionally unavailable outside GitHub.
+    // Reloading an unpacked extension invalidates its scripts in tabs that were
+    // already open. Re-inject once so context tracking and file navigation work
+    // without requiring the reviewer to manually refresh GitHub.
+    if (await ensureContentScript(tabId, fallbackUrl)) {
+      try {
+        const context = await readTabContext(tabId);
+        if (context) return context;
+      } catch {
+        // Fall through to the last observed or URL-derived context.
+      }
+    }
   }
   return contextByTab.get(tabId) ?? getPageContext(fallbackUrl);
 }
@@ -63,6 +96,8 @@ export default defineBackground(() => {
     }
   });
 
-  browser.tabs.onRemoved.addListener((tabId) => contextByTab.delete(tabId));
+  browser.tabs.onRemoved.addListener((tabId) => {
+    contextByTab.delete(tabId);
+    contentScriptInjectionByTab.delete(tabId);
+  });
 });
-

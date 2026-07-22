@@ -9,7 +9,7 @@ export default defineConfig({
     name: "Primer Review Story",
     description: "An evidence-backed AI review companion for GitHub pull requests.",
     minimum_chrome_version: "116",
-    permissions: ["tabs", "storage"],
+    permissions: ["tabs", "storage", "scripting"],
     host_permissions: [
       "https://github.com/*",
       "http://127.0.0.1:8787/*",

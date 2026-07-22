@@ -179,7 +179,10 @@ function scrollToFile(path: string): boolean {
   const candidates = Array.from(document.querySelectorAll(FILE_SELECTOR));
   const target = candidates.find((element) => readFilePath(element) === path);
   if (!target) return false;
-  target.scrollIntoView({ behavior: "smooth", block: "start" });
+  // Avoid publishing every intermediate file as the active review step while
+  // traveling through a large diff. The destination is still aligned at the
+  // start of the GitHub viewport.
+  target.scrollIntoView({ behavior: "auto", block: "start" });
   return true;
 }
 
