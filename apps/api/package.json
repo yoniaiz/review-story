@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/server.ts",
+    "dev": "tsx watch --include ../../.env src/server.ts",
     "build": "tsup",
     "smoke": "node scripts/smoke-built-server.mjs",
     "start": "node dist/server.js",
