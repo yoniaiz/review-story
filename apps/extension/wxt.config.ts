@@ -24,6 +24,13 @@ const apiOrigins = [...(configuredApiOrigin ? [configuredApiOrigin] : []), ...lo
 
 export default defineConfig({
   modules: ["@wxt-dev/module-react"],
+  // Don't launch a managed browser: the dev build is loaded unpacked in the
+  // developer's own Chrome, where it still gets HMR from the dev server. A
+  // second managed instance means two extension copies with separate auth
+  // storage and stale builds — a recurring source of phantom bugs.
+  webExt: {
+    disabled: true,
+  },
   // WXT's development manifest registers content scripts at runtime through
   // this server. If a second dev process silently chooses another port, an
   // already-loaded extension can keep the old worker and stop receiving page
