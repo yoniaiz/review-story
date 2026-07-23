@@ -113,6 +113,39 @@ _Last updated: 2026-07-23 (branch `eric-post-hackathon`, PR yoniaiz/review-story
 - [ ] **Run the Tier-2 validation gate** (PRD §9) — on 3 known PRs, ≥1 true
   intent-vs-implementation mismatch, 0 false claims-as-facts; we have the
   PRs, the gate is unrun.
+- [ ] **Context archive branch** (idea — agent-proposed, needs team
+  evaluation; origin: the Corpus-B run of the 2026-07-24 dogfood
+  experiment, `docs/experiments/2026-07-24-decision-corpus-dogfood.md`).
+  - **Why this is only an idea**: it was designed by an authoring agent
+    working *within* decision records 004/005, not by the team; nobody has
+    ratified it, and it competes for scope with the API record it would
+    mirror. It is recorded so the design isn't lost, not because it is
+    scheduled.
+  - **What it serves**: the one goal §4.5/§4.6 currently gives up —
+    per-PR context that is durable *in git* (survives GitHub, travels
+    with clones, platform-independent) — without violating the settled
+    constraint that per-PR context never touches the reviewed diff.
+  - **Why it would matter**: it makes the context history tamper-evident
+    and portable (append-only files under git's own history), gives
+    enterprises an exportable audit trail that isn't hostage to Primer's
+    database, and would strengthen the §6.5 compliance story ("every
+    claim, at every push, in your own repo").
+  - **How it operates**: a bot-written orphan branch (e.g.
+    `primer/context-archive`) with no shared history with the code — same
+    repository, never merged, never in any PR's diff (the `gh-pages`
+    pattern). Layout: one folder per PR, one immutable YAML file per
+    (PR, head SHA) push, written by Primer's server via GitHub's git data
+    API at context ingestion and at merge. Append-only; files are never
+    edited. Precedence unchanged: the API record stays the system of
+    record ("database wins"); the branch is the durable, portable mirror.
+  - **Costs to weigh**: requires contents-write App permission (shared
+    with the check-run/graduation work), a second copy of API data (needs
+    the explicit database-wins rule), and file accumulation on busy repos
+    (tiny files, but unbounded).
+  - **Relationship to §4.6**: complementary, not competing — the archive
+    is the *raw per-push record*; `.primer/decisions/` remains the
+    *curated, human-ratified distillation*. If built, it slots into the
+    post-deploy webhook cluster alongside graduation.
 - [ ] **`.primer/` repo memory** (PRD §4.6, proposal — needs design + team
   ratification) — not a PR-context carrier: durable repo-resident memory.
   Merged PRs' decision logs graduate into ADR-shaped
