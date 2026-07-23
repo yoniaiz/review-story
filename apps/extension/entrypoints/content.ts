@@ -558,6 +558,8 @@ function findCommentTrigger(lineElement: Element): HTMLElement | undefined {
     "button[aria-label*='Add line comment']",
     "button[aria-label*='add line comment']",
     "button[data-testid*='add-line-comment']",
+    "button[data-add-comment-button]",
+    "button[aria-label='Add comment']",
   ].join(", ");
   if (lineElement instanceof HTMLElement && lineElement.matches(selector)) return lineElement;
   const scopes = [
@@ -579,15 +581,50 @@ const COMMENT_COMPOSER_SELECTOR = [
   "textarea[placeholder*='comment' i]",
   "textarea[aria-label*='comment' i]",
   "[contenteditable='true'][data-testid*='comment']",
+  "[contenteditable='true'][aria-label*='comment' i]",
+  "[contenteditable='true'][role='textbox']",
+  // Last resort for markup drift: any fresh visible editor. Callers only
+  // accept composers that were absent before the trigger click.
+  "textarea",
 ].join(", ");
+
+// GitHub's /changes diff UI mounts its "Add comment" button through React
+// hover state, so it does not exist in the DOM until the pointer visits the
+// line. Synthetic pointer/mouse events reproduce that.
+async function hoverForCommentTrigger(lineElement: Element): Promise<HTMLElement | undefined> {
+  const cell = lineElement.closest("td, [role='gridcell']") ?? lineElement;
+  const rect = cell.getBoundingClientRect();
+  const options = {
+    bubbles: true,
+    cancelable: true,
+    clientX: rect.x + Math.min(12, rect.width / 2),
+    clientY: rect.y + Math.min(8, rect.height / 2),
+  };
+  for (const type of ["pointerover", "pointerenter", "pointermove"]) {
+    cell.dispatchEvent(new PointerEvent(type, { ...options, pointerId: 1 }));
+  }
+  for (const type of ["mouseover", "mouseenter", "mousemove"]) {
+    cell.dispatchEvent(new MouseEvent(type, options));
+  }
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    await new Promise((resolve) => window.setTimeout(resolve, 100));
+    const trigger = findCommentTrigger(lineElement);
+    if (trigger) return trigger;
+  }
+  return undefined;
+}
 
 function waitForNewComposer(
   file: Element,
   existing: Set<Element>,
   timeoutMs = 3_000,
 ): Promise<HTMLElement | undefined> {
-  const find = () => Array.from(file.querySelectorAll<HTMLElement>(COMMENT_COMPOSER_SELECTOR))
-    .find((element) => !existing.has(element) && isVisible(element));
+  const find = () =>
+    Array.from(file.querySelectorAll<HTMLElement>(COMMENT_COMPOSER_SELECTOR))
+      .find((element) => !existing.has(element) && isVisible(element))
+    // The /changes UI can mount the composer outside the file container.
+    ?? Array.from(document.querySelectorAll<HTMLElement>(COMMENT_COMPOSER_SELECTOR))
+      .find((element) => !existing.has(element) && isVisible(element));
   const immediate = find();
   if (immediate) return Promise.resolve(immediate);
 
@@ -605,7 +642,9 @@ function waitForNewComposer(
       if (composer) finish(composer);
     });
     const timer = window.setTimeout(() => finish(), timeoutMs);
-    observer.observe(file, { childList: true, subtree: true });
+    // Watch the whole document: the /changes UI can portal the composer
+    // outside the file container. The observer lives for at most timeoutMs.
+    observer.observe(document.body, { childList: true, subtree: true });
   });
 }
 
@@ -642,9 +681,9 @@ async function draftNativeComment(anchor: DiffAnchor, body: string): Promise<Com
   if (anchor.startLine !== undefined) return { ok: false, error: "range-not-supported" };
 
   const file = findFileElement(anchor.path);
-  const trigger = findCommentTrigger(lineElement);
+  const trigger = findCommentTrigger(lineElement) ?? await hoverForCommentTrigger(lineElement);
   if (!file || !trigger) return { ok: false, error: "composer-not-found" };
-  const existing = new Set(file.querySelectorAll(COMMENT_COMPOSER_SELECTOR));
+  const existing = new Set(document.querySelectorAll(COMMENT_COMPOSER_SELECTOR));
   trigger.click();
   const composer = await waitForNewComposer(file, existing);
   if (!composer) return { ok: false, error: "composer-not-found" };
