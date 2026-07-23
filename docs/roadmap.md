@@ -29,7 +29,36 @@ _Last updated: 2026-07-23 (branch `eric-post-hackathon`, PR yoniaiz/review-story
 - [ ] Prod data posture: `REVIEW_SESSION_STORE=supabase`, story cache
   location, and a cleanup job for expired `harness_sessions` rows.
 
-## Product
+## Product — design-doc gaps (review-story-design.md §4, §9, §11)
+
+- [ ] **Agentic chat harness** (§11, D6) — the design specifies a Claude Agent
+  SDK investigator with read-only Read/Grep/Glob over the PR workspace,
+  streamed tool activity, and thread-seeded sessions. Current engine is a
+  single-shot OpenAI Responses call with pasted evidence — no tools, no
+  codebase navigation. The `ChatEngine` seam exists; this is an engine swap.
+  Build §11's guardrails (workspace pinning, no network, untrusted-input
+  posture) with it, not after. Highest-leverage item in the backlog.
+- [ ] **Skills system** — the composer advertises "type / for skills" but only
+  `/comment` exists. Add a small command registry + `/` discoverability
+  popover; natural set: `/comment` (composer draft), `/stage` (the flagged
+  API pending-review path — its proper home), `/copy` (design §9's universal
+  fallback), `/evidence`, later `/since` (round-2).
+- [ ] **Ghost-comment UX per §9** — location confirm before staging, staged
+  list with un-stage, Copy-comment fallback button. Also record a D15 in the
+  design decision log: composer-first DOM drafting reverses D4's API-primary
+  choice; the API path remains for virtualized/unmounted lines.
+- [ ] **Round 2 / delta** (§4, §7) — the "it remembered" experience: persist
+  the diff snapshot with the story, checkpoint per user, delta classify →
+  route → scoped regen, your-comments checklist with independent thread
+  badges, changed-since-review chapters, mid-review push banner (SHA poll).
+  Prerequisite for the multi-reviewer story. Nothing built yet.
+- [ ] **Per-persona entry points** — in the artifact schema and Stage-3
+  output; not surfaced in the panel UI.
+- [ ] **Design-doc refresh** — §6/§12 still say SQLite/Drizzle + PAT; reality
+  is Supabase + GitHub App OAuth. Update, and add this cycle's decisions to
+  the §16 log.
+
+## Product — smaller items
 
 - [ ] **Surface `meta.warnings` in the panel** — the contract carries analyzer
   degradation warnings (e.g. diff-only notes); no UI renders them. Small.
