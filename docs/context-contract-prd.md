@@ -138,6 +138,43 @@ one-time-per-repo motion as the GitHub App install — bundle them as a single
 "Primer setup" flow. No per-user installs, no version skew, works identically
 for Claude Code, Codex, Cursor, and humans.
 
+## 6.5 Enterprise posture & adjacent integrations
+
+**Point of access.** The org-level GitHub App install is the enterprise entry
+point: admin-granted, scoped, auditable, centrally revocable. Developer
+identity rides GitHub org membership (inheriting the org's SSO/SAML);
+extensions deploy fleet-wide via Chrome enterprise policy. The open
+architectural fork: the API sees code and review data, so enterprise means
+either a self-hosted/VPC deployment (the existing single-container Docker +
+Postgres shape fits) or a hosted tier with zero-retention LLM agreements and
+the §12 retention policy made contractual.
+
+**Carrying the contract by policy, not habit — the enforcement ladder:**
+
+1. *Ambient*: template + agent-instructions files make the block the default.
+2. *Visible*: the App posts a check-run per PR — "context block present and
+   valid" vs "missing — Primer inferred one." Non-blocking; absence becomes
+   visible in the merge box.
+3. *Required* (opt-in per repo/org): the check becomes a branch-protection
+   required status; the contract then carries on 100% of PRs by policy.
+
+Level 3 is also the compliance story: "every merged change has documented
+intent, declared provenance (agent vs human), named risk areas, and evidence
+of human review" is the change-management audit trail SOC 2 / ISO
+change-control asks for — generated as a by-product. For enterprises,
+"which Q3 changes were agent-authored and who reviewed them?" may be a
+stronger buying reason than the review UX itself.
+
+**Notion / Jira / Linear.** Intent exists at three grains; each layer owns
+one: **requirement** (ticket/PRD — Jira, Linear, Notion), **decision** (the
+authoring session — the contract, Primer's turf, captured by nobody else),
+**implementation** (the diff — GitHub). Integrations are read-only context
+resolvers for the contract's `alignment` pointers: Primer fetches the linked
+requirement text into the Review Brief and upgrades verification to the full
+chain — *ticket says X → author claims X implemented → diff shows/lacks
+evidence*. No requirement management, no ticket write-back — the moment we
+write to Jira we are a project-management tool and off-thesis.
+
 ## 7. Non-goals
 
 - Not a session-transcript format — the contract is a distillation, small
