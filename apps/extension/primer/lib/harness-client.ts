@@ -82,6 +82,13 @@ export class HarnessClient {
     return this.#request("/auth/me", { method: "GET" });
   }
 
+  async getAppAccess(owner: string, repo: string): Promise<{ installed: boolean; installUrl?: string }> {
+    return this.#request(
+      `/api/github/repos/${segment(owner)}/${segment(repo)}/app-access`,
+      { method: "GET" },
+    );
+  }
+
   async getMyPulls(): Promise<MyPullSummary[]> {
     const result = await this.#request<{ pulls: MyPullSummary[] }>(
       "/api/github/my-pulls",

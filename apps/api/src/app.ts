@@ -118,6 +118,27 @@ export async function buildApp(
     }
   });
 
+  // Whether the signed-in user's App installation covers this repository —
+  // i.e. whether publishing review comments there can succeed. Sign-in alone
+  // grants reads; writes require the App to be installed on the repo.
+  app.get<{ Params: RepositoryRouteParams }>(
+    "/api/github/repos/:owner/:repo/app-access",
+    async (request, reply) => {
+      const slug = process.env.GITHUB_APP_SLUG;
+      const installUrl = slug ? `https://github.com/apps/${slug}/installations/new` : undefined;
+      const userId = request.auth?.user?.id;
+      // Legacy/unauthenticated modes publish with the server PAT; report ok.
+      if (!auth || !userId) return { installed: true };
+      try {
+        const token = await auth.getUserGitHubToken(userId);
+        const installed = await appInstalledOnRepo(token, request.params.owner, request.params.repo);
+        return { installed, ...(installUrl ? { installUrl } : {}) };
+      } catch (error) {
+        return githubTokenFailure(reply, error);
+      }
+    },
+  );
+
   app.get<{ Params: RepositoryRouteParams }>(
     "/api/github/repos/:owner/:repo/pulls",
     async (request, reply) => {
@@ -480,6 +501,38 @@ async function searchMyPulls(token: string): Promise<MyPullSummary[]> {
     seen.add(key);
     return true;
   }).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+}
+
+async function appInstalledOnRepo(token: string, owner: string, repo: string): Promise<boolean> {
+  const headers = {
+    Accept: "application/vnd.github+json",
+    Authorization: `Bearer ${token}`,
+    "User-Agent": "review-story-api",
+    "X-GitHub-Api-Version": "2022-11-28",
+  };
+  const installationsResponse = await fetch("https://api.github.com/user/installations?per_page=100", { headers });
+  if (!installationsResponse.ok) {
+    throw new GitHubPullReaderError(installationsResponse.status, `GitHub installations lookup failed (${installationsResponse.status})`);
+  }
+  const { installations = [] } = await installationsResponse.json() as {
+    installations?: { id: number; account?: { login?: string } | null; repository_selection?: string }[];
+  };
+  const installation = installations.find(
+    (candidate) => candidate.account?.login?.toLowerCase() === owner.toLowerCase(),
+  );
+  if (!installation) return false;
+  if (installation.repository_selection === "all") return true;
+  for (let page = 1; page <= 5; page += 1) {
+    const reposResponse = await fetch(
+      `https://api.github.com/user/installations/${installation.id}/repositories?per_page=100&page=${page}`,
+      { headers },
+    );
+    if (!reposResponse.ok) return false;
+    const { repositories = [] } = await reposResponse.json() as { repositories?: { name?: string }[] };
+    if (repositories.some((candidate) => candidate.name?.toLowerCase() === repo.toLowerCase())) return true;
+    if (repositories.length < 100) break;
+  }
+  return false;
 }
 
 function githubTokenFailure(

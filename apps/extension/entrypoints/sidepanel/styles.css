@@ -178,6 +178,8 @@ button.primary-action { border: 0; cursor: pointer; }
 .draft-feedback.is-success { border-color: #b9d9ca; background: var(--verified-soft); color: var(--verified); }
 .draft-feedback.is-error { border-color: #efd2ca; background: #fff8f5; color: var(--risk); }
 .draft-feedback.is-working { border-color: #c8d8f5; background: var(--signal-soft); color: var(--signal); }
+.feedback-action { flex: none; margin-left: auto; padding: 3px 9px; border: 1px solid currentColor; border-radius: 6px; background: none; color: inherit; font: inherit; font-size: 9px; cursor: pointer; }
+.feedback-action:hover { background: rgba(255,255,255,.5); }
 .composer { width: 100%; max-width: 680px; margin: 0 auto; padding: 11px 11px 8px 13px; border: 1px solid #b8bcb6; border-radius: 13px; background: var(--surface); }
 .composer:focus-within { border-color: var(--signal); box-shadow: 0 0 0 3px var(--signal-soft); }
 .composer textarea { width: 100%; min-height: 47px; resize: none; padding: 2px 2px 5px; border: 0; outline: 0; background: transparent; color: var(--ink); font-size: 12px; line-height: 1.45; }

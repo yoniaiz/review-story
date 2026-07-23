@@ -725,7 +725,18 @@ function ReviewConversation({ context, plan, session, client, onSessionChange }:
   const [draftFeedback, setDraftFeedback] = useState<{
     tone: "working" | "success" | "error";
     message: string;
+    action?: { label: string; url: string };
   }>();
+  const [appAccess, setAppAccess] = useState<{ installed: boolean; installUrl?: string }>();
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!context.owner || !context.repository) return () => { cancelled = true; };
+    void client.getAppAccess(context.owner, context.repository)
+      .then((access) => { if (!cancelled) setAppAccess(access); })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [client, context.owner, context.repository]);
   const selected = route[selectedIndex];
   const selectedStatus = selected ? statuses[selected.step.fileId] ?? selected.step.status : "pending";
   const severity = selected?.file.severity ?? "standard";
@@ -897,11 +908,17 @@ function ReviewConversation({ context, plan, session, client, onSessionChange }:
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : "";
+      const installUrl = /App to be installed/i.test(message)
+        ? message.match(/https:\/\/github\.com\/apps\/\S+/)?.[0]
+        : undefined;
       setDraftFeedback({
         tone: "error",
         message: /422|pending review/i.test(message)
           ? "GitHub already has a pending review for you on this PR. Submit or discard it on GitHub, then try again."
-          : `Could not create the review comment.${message ? ` ${message}` : ""}`,
+          : installUrl
+            ? `Publishing needs the Primer GitHub App installed on ${context.owner}/${context.repository}. Install it, or send the link to the repo owner.`
+            : `Could not create the review comment.${message ? ` ${message}` : ""}`,
+        ...(installUrl ? { action: { label: "Install", url: installUrl } } : {}),
       });
     }
   };
@@ -1056,10 +1073,37 @@ function ReviewConversation({ context, plan, session, client, onSessionChange }:
           <button className={`control-button status-control ${selectedStatus === "reviewed" ? "is-reviewed" : ""}`} type="button" aria-label={selectedStatus === "reviewed" ? "Chapter reviewed" : "Complete chapter"} disabled={!selected || selectedStatus === "reviewed"} onClick={() => void completeSelected()}><CheckCircle2 size={15} /></button>
           <button className="control-button" type="button" aria-label="Next review step" disabled={selectedIndex >= route.length - 1} onClick={() => navigateTo(selectedIndex + 1)}><ArrowRight size={15} /></button>
         </div>
+        {appAccess?.installed === false && !draftFeedback ? (
+          <div className="draft-feedback is-working" role="status">
+            <AlertCircle size={13} />
+            <span>
+              Primer can read this pull request but cannot publish comments until its GitHub App
+              is installed on {context.owner}/{context.repository}.
+            </span>
+            {appAccess.installUrl ? (
+              <button
+                className="feedback-action"
+                type="button"
+                onClick={() => { void browser.tabs.create({ url: appAccess.installUrl }); }}
+              >
+                Install
+              </button>
+            ) : null}
+          </div>
+        ) : null}
         {draftFeedback ? (
           <div className={`draft-feedback is-${draftFeedback.tone}`} role="status">
             {draftFeedback.tone === "success" ? <CheckCircle2 size={13} /> : <AlertCircle size={13} />}
             <span>{draftFeedback.message}</span>
+            {draftFeedback.action ? (
+              <button
+                className="feedback-action"
+                type="button"
+                onClick={() => { void browser.tabs.create({ url: draftFeedback.action!.url }); }}
+              >
+                {draftFeedback.action.label}
+              </button>
+            ) : null}
           </div>
         ) : null}
         <form className="composer" onSubmit={(event) => {
