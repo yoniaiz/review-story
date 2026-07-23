@@ -113,6 +113,13 @@ _Last updated: 2026-07-23 (branch `eric-post-hackathon`, PR yoniaiz/review-story
 - [ ] **Run the Tier-2 validation gate** (PRD §9) — on 3 known PRs, ≥1 true
   intent-vs-implementation mismatch, 0 false claims-as-facts; we have the
   PRs, the gate is unrun.
+- [ ] **`.primer/` repo memory** (PRD §4.6, proposal — needs design + team
+  ratification) — not a PR-context carrier: durable repo-resident memory.
+  Merged PRs' decision logs graduate into ADR-shaped
+  `.primer/decisions/` records (candidate automation: merge-time webhook
+  proposes the graduation commit); Tier-1 reads the corpus back for
+  alignment checks that compound with every merge; `.primer/config.yaml`
+  becomes the config home when Primer grows repo-level settings.
 - [ ] **Review Brief** (team decision needed) — the pre-review screen from
   primer's `PRODUCT_REVIEW_BRIEF.md`: *what changed, why it matters, what
   requires me, why trust this route* — with a reconciling scope funnel

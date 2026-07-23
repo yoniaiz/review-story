@@ -131,6 +131,36 @@ adoption) and is the wrong **system of record** for a product:
 Until the API is hosted, the body block **is** the carrier (current state,
 §11); nothing about the format changes when the API lands.
 
+## 4.6 `.primer/` as repo-resident memory (proposal, distinct from the carrier)
+
+`.primer/context.md` lost the per-PR-carrier role for scope reasons: a
+committed file pollutes the very diff Primer reviews, stores PR-scoped data
+in branch-scoped storage (post-merge it describes nothing current; parallel
+PRs conflict), and can't be edited mid-review without moving the head SHA.
+
+Its unique property — **in the repo**: versioned with the code,
+host-agnostic, greppable, reviewable as content — fits a different role:
+**durable repo memory**, the accumulation layer per-PR context lacks.
+
+- **Decision graduation**: when a PR merges, the durable residue of its
+  contract (decisions that outlive the PR) distills into
+  `.primer/decisions/` — ADR-shaped records agents and humans already know
+  how to read. Candidate automation: the merge-time webhook proposes the
+  graduation commit. The graduation commit is its own change, so PR diffs
+  stay clean.
+- **Tier-1 source**: the analyzer reads `.primer/decisions/` alongside the
+  other direction docs — "this PR contradicts a decision recorded in
+  `.primer/decisions/007-composer-first.md`" becomes a checkable alignment
+  note, and the corpus compounds with every merge (the "continual codebase
+  context" layer).
+- **Config home**: repo-level Primer settings (`.primer/config.yaml` —
+  enforcement level, ignore patterns, conventions) live in the same
+  directory when Primer grows configurable behavior.
+
+Status: proposal only — needs design (graduation format, dedup, who
+approves the graduation commit) and team ratification alongside the rest of
+this PRD. Nothing implements it yet.
+
 ## 5. How Primer consumes it
 
 Three tiers, buildable independently and in order:
@@ -299,9 +329,10 @@ write to Jira we are a project-management tool and off-thesis.
 1. Ratify the v0 field set — anything missing that authors would actually
    fill? Anything that will rot unfilled?
 2. ~~PR-body block vs `.primer/context.md` as primary?~~ Superseded by §4.5
-   (v1.1): API-first once hosted; body block as ingest/mirror/fallback;
-   `.primer/context.md` dropped unless someone hits the body size limit.
-   Ratify the §4.5 architecture itself.
+   (v1.1): API-first once hosted; body block as ingest/mirror/fallback.
+   `.primer/context.md` is no longer a carrier candidate — it is reframed
+   as repo-resident memory (§4.6: decision graduation on merge, Tier-1
+   source, config home). Ratify §4.5 and §4.6 as a pair.
 3. Does the verification pass run in the analyzer pipeline (Stage 2.5) or as
    part of the future agentic harness (which the roadmap already specs)?
 4. Naming: "Primer Context" / "context contract" / something better — and
