@@ -86,9 +86,33 @@ _Last updated: 2026-07-23 (branch `eric-post-hackathon`, PR yoniaiz/review-story
   repo-resident direction docs for alignment notes. Tier 2: parse + verify a
   structured `primer-context` block (intent, decisions, risk areas,
   verification claims) — enables intent-vs-implementation diffing and feeds
-  the Review Brief's human-review mission. Tier 3: emitters (PR template,
-  CLAUDE.md/AGENTS.md paragraph, packaged skill, inferred fallback).
-  Distribution = one setup PR per repo; no per-user installs.
+  the Review Brief's human-review mission. Partially shipped on
+  `eric-context-contract` / PR #16 (parser, context endpoint, unified brief,
+  elevation-only risk merge); see PRD §11 for the honest inventory.
+- [ ] **Authoring-side emitter chain** (PRD §5.5 — "the moment the PR
+  description is written is the last moment the authoring context exists").
+  The repo is the universal adapter: one setup PR ships every emitter, and
+  the contract is the description's *skeleton*, not an attachment.
+  - [x] `.github/PULL_REQUEST_TEMPLATE.md` block skeleton (humans)
+  - [x] `CLAUDE.md` emit instructions (Claude Code — produced PR #16's block)
+  - [ ] `AGENTS.md` + `.cursor/rules` variants (Codex/Devin, Cursor)
+  - [ ] `/pr` skill (`.claude/skills/primer-context/`): composes the
+    description around the contract; post-deploy, POSTs to the context API
+  - [ ] Claude Code hook on `gh pr create` — blocks creation without a
+    block; the only authoring-side hard gate (PRD open question 6:
+    default-on vs opt-in)
+  - [ ] Inferred-fallback generator (Primer drafts a block from commits +
+    diff when absent, labeled `provenance: inferred`)
+  - Server-side rungs of the chain (check-run flag → required status) live
+    in the Deployment section's event-driven-App item; graduated posture:
+    solo dev = nudge + fallback, team = + check-run, enterprise = required.
+- [ ] **API-first carrier** (PRD §4.5, unlocked by hosting) — authenticated
+  `POST` of the contract keyed by repo+PR+head SHA (verified provenance,
+  per-push history); PR body demotes to human mirror + zero-adoption
+  fallback; reader prefers the API record and flags mirror divergence.
+- [ ] **Run the Tier-2 validation gate** (PRD §9) — on 3 known PRs, ≥1 true
+  intent-vs-implementation mismatch, 0 false claims-as-facts; we have the
+  PRs, the gate is unrun.
 - [ ] **Review Brief** (team decision needed) — the pre-review screen from
   primer's `PRODUCT_REVIEW_BRIEF.md`: *what changed, why it matters, what
   requires me, why trust this route* — with a reconciling scope funnel
