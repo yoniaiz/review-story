@@ -192,9 +192,27 @@ Two principles:
   Tier 1 reads at review time; the `alignment` field points back into them.
   Keeping direction docs current feeds the product directly.
 
-Full enforcement chain (graduated, per repo appetite): generation nudge →
-creation gate (hook) → server check-run flag → required status → inference
-fallback. Solo dev gets the first and last; enterprise flips them all on.
+**The enforcement chain.** No single layer guarantees the contract; the
+chain does:
+
+1. **Generation moment** (authoring tool): instructions/skill make the agent
+   write the description *around* the contract — intent, decisions, and
+   risks are the description's structure, with prose for humans wrapped
+   around them, so the block is never extra work after the fact.
+2. **Creation gate** (Claude Code hook, optional per repo): `gh pr create`
+   without a block → blocked with "emit the context block first." A hard
+   stop before GitHub ever sees the PR.
+3. **Server flag** (post-deploy webhook): PR opened → Primer's check-run
+   marks ✓/⚠ in the merge box. The author sees it instantly; visibility and
+   social pressure do the rest.
+4. **Hard policy** (opt-in): the check-run becomes a branch-protection
+   required status — no merge without valid context. Enterprise mode.
+5. **Backstop** (always on): no block anywhere → Primer infers one from
+   commits + diff, labeled `inferred`. The reviewer experience never
+   degrades to zero.
+
+Graduated by appetite: a solo dev gets 1 + 5, a team runs 1–3, an
+enterprise flips on 4.
 
 ## 6. Installation & distribution story
 
