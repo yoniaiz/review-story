@@ -37,13 +37,25 @@ export function registerAuthRoutes(
     },
   );
 
-  app.get<{ Querystring: { code?: string; state?: string; error?: string } }>(
+  app.get<{ Querystring: { code?: string; state?: string; error?: string; setup_action?: string } }>(
     "/auth/github/callback",
     async (request, reply) => {
       const oauth = auth.oauth;
       if (!oauth) return reply.code(503).send({ error: "github_sign_in_not_configured" });
       const { code, state } = request.query;
       if (!code || !state) {
+        // Installs started from GitHub's own app page (not our sign-in flow)
+        // land here with a code but no state. The installation itself
+        // succeeded; the user just needs to sign in from the extension.
+        if (request.query.setup_action) {
+          return reply.type("text/html").send(
+            "<!doctype html><meta charset='utf-8'><title>Primer installed</title>"
+            + "<body style='font-family:system-ui;max-width:32rem;margin:15vh auto;line-height:1.5'>"
+            + "<h1 style='font-size:1.2rem'>Primer is installed ✔</h1>"
+            + "<p>You can close this tab. Open the Primer side panel and click "
+            + "<strong>Sign in with GitHub</strong> to finish connecting.</p></body>",
+          );
+        }
         return reply.code(400).send({ error: "invalid_callback", message: request.query.error ?? "missing code or state" });
       }
       const redirectUri = await auth.users.consumeOauthState(state);
