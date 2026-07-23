@@ -38,11 +38,20 @@ _Last updated: 2026-07-23 (branch `eric-post-hackathon`, PR yoniaiz/review-story
   codebase navigation. The `ChatEngine` seam exists; this is an engine swap.
   Build §11's guardrails (workspace pinning, no network, untrusted-input
   posture) with it, not after. Highest-leverage item in the backlog.
+  **Spec to build against**: `PRODUCT_REVIEW_BRIEF.md` in
+  `erl-jpg/codex-hackathon-primer` — the agent-as-investigator doctrine:
+  agent runs *after* deterministic evidence exists and *before* the plan is
+  finalized; bounded read-only triage returning exact citations in a frozen
+  normalized schema; falsifiable evaluation gate (fails → the SDK experiment
+  ends); pinned versions, turn/token/wall-clock budgets, deterministic
+  verification of every displayed claim, SHA-cached accepted artifacts.
 - [ ] **Skills system** — the composer advertises "type / for skills" but only
-  `/comment` exists. Add a small command registry + `/` discoverability
-  popover; natural set: `/comment` (composer draft), `/stage` (the flagged
-  API pending-review path — its proper home), `/copy` (design §9's universal
-  fallback), `/evidence`, later `/since` (round-2).
+  `/comment` exists. The primer `EXTENSION_ROADMAP.md` already designed the
+  set: **`/explain`, `/evidence`, `/navigate`, `/recheck`, `/comment`** —
+  resurrect it as the registry's initial contents (several are thin wrappers
+  over existing capabilities), plus `/stage` (the flagged API pending-review
+  path — its proper home), `/copy` (design §9's universal fallback), later
+  `/since` (round-2). Add a `/` discoverability popover.
 - [ ] **Ghost-comment UX per §9** — location confirm before staging, staged
   list with un-stage, Copy-comment fallback button. Also record a D15 in the
   design decision log: composer-first DOM drafting reverses D4's API-primary
@@ -54,9 +63,33 @@ _Last updated: 2026-07-23 (branch `eric-post-hackathon`, PR yoniaiz/review-story
   Prerequisite for the multi-reviewer story. Nothing built yet.
 - [ ] **Per-persona entry points** — in the artifact schema and Stage-3
   output; not surfaced in the panel UI.
+- [ ] **Review Brief** (team decision needed) — the pre-review screen from
+  primer's `PRODUCT_REVIEW_BRIEF.md`: *what changed, why it matters, what
+  requires me, why trust this route* — with a reconciling scope funnel
+  ("158 changed → collapsed → relevant → 5 chapters"), a human-review
+  mission (the few questions needing human judgment), and a trust/readiness
+  block (analyzed SHA, evidence availability, generated-vs-fixture
+  labeling). Its critique still holds: the panel opens straight into
+  chapters — "the map should be the first act, not the unexplained front
+  door." Was explicitly labeled a proposal awaiting Yoni/Itay review and
+  never ratified — put it on the team agenda before building.
+- [ ] **Reviewer posture + risk ledger** (from the same brief, further out) —
+  a Focused → Adversarial depth dial, post-review calibration feedback,
+  and a live evidence-backed risk ledger that updates as checks run and
+  decisions land, using coarse labels rather than precise-looking scores.
+- [ ] **Findings & review outcome layers** — primer roadmap steps 12–14,
+  unbuilt in both repos: persistent findings (reviewer controls type,
+  resolution, recheck, blocking), revision handling (which prior judgments
+  survive a push), and review synthesis where the human exclusively picks
+  approve / comment / request changes.
 - [ ] **Design-doc refresh** — §6/§12 still say SQLite/Drizzle + PAT; reality
-  is Supabase + GitHub App OAuth. Update, and add this cycle's decisions to
-  the §16 log.
+  is Supabase + GitHub App OAuth. Update, add this cycle's decisions to the
+  §16 log, and adopt the primer brief's positioning line in §3: *"make the
+  remaining human-review responsibility explicit, then provide the shortest
+  evidence-backed path through it"* (vs CodeRabbit = traverse easily,
+  Baz = specialized reviewers).
+- [ ] **Settle the name** — Review Story vs Primer is still unresolved and
+  both appear across the codebase and docs.
 
 ## Product — smaller items
 
