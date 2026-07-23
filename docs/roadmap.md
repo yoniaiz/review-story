@@ -63,6 +63,16 @@ _Last updated: 2026-07-23 (branch `eric-post-hackathon`, PR yoniaiz/review-story
   Prerequisite for the multi-reviewer story. Nothing built yet.
 - [ ] **Per-persona entry points** — in the artifact schema and Stage-3
   output; not surfaced in the panel UI.
+- [ ] **Context ingestion / context contract** (PRD:
+  [`context-contract-prd.md`](context-contract-prd.md), needs team
+  ratification) — carry authoring context across the author→reviewer
+  boundary. Tier 1: analyzer ingests commits, linked issues, and
+  repo-resident direction docs for alignment notes. Tier 2: parse + verify a
+  structured `primer-context` block (intent, decisions, risk areas,
+  verification claims) — enables intent-vs-implementation diffing and feeds
+  the Review Brief's human-review mission. Tier 3: emitters (PR template,
+  CLAUDE.md/AGENTS.md paragraph, packaged skill, inferred fallback).
+  Distribution = one setup PR per repo; no per-user installs.
 - [ ] **Review Brief** (team decision needed) — the pre-review screen from
   primer's `PRODUCT_REVIEW_BRIEF.md`: *what changed, why it matters, what
   requires me, why trust this route* — with a reconciling scope funnel
