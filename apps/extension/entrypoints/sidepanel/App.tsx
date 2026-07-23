@@ -891,8 +891,31 @@ function ReviewConversation({ context, plan, session, client, onSessionChange }:
       return;
     }
 
-    // Publish through the harness API with the signed-in user's GitHub token
-    // instead of driving GitHub's DOM, which breaks on every UI redesign.
+    // Prefer drafting in GitHub's own inline composer: it renders live and
+    // flows through GitHub's native review-submit UI. Fall back to the API
+    // (which always works but needs a page refresh to render) when the DOM
+    // drive fails — e.g. after a GitHub redesign or on virtualized lines.
+    try {
+      const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+      if (tab?.id !== undefined) {
+        const result: unknown = await browser.tabs.sendMessage(tab.id, {
+          type: "primer:draft-comment",
+          anchor,
+          body,
+        }).catch(() => undefined);
+        if (result && typeof result === "object" && (result as { ok?: boolean }).ok) {
+          setComposerValue("");
+          setDraftFeedback({
+            tone: "success",
+            message: "Draft ready in GitHub's composer. Edit it there, then Start a review.",
+          });
+          return;
+        }
+      }
+    } catch {
+      // Fall through to the API path.
+    }
+
     try {
       const draft = await client.createDraft(session.id, {
         body,

@@ -592,7 +592,25 @@ const COMMENT_COMPOSER_SELECTOR = [
 // hover state, so it does not exist in the DOM until the pointer visits the
 // line. Synthetic pointer/mouse events reproduce that.
 async function hoverForCommentTrigger(lineElement: Element): Promise<HTMLElement | undefined> {
-  const cell = lineElement.closest("td, [role='gridcell']") ?? lineElement;
+  // Try the line-number cell first, then the code cell in the same row — the
+  // /changes UI mounts the button off hover state on the row's cells.
+  const row = lineElement.closest("tr, [role='row'], [data-testid='diff-line']");
+  const targets = [
+    lineElement.closest("td, [role='gridcell']") ?? lineElement,
+    ...(row ? Array.from(row.querySelectorAll("td.diff-text-cell, [role='gridcell']")) : []),
+  ];
+  for (const cell of targets) {
+    dispatchHover(cell);
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 100));
+      const trigger = findCommentTrigger(lineElement);
+      if (trigger) return trigger;
+    }
+  }
+  return undefined;
+}
+
+function dispatchHover(cell: Element): void {
   const rect = cell.getBoundingClientRect();
   const options = {
     bubbles: true,
@@ -606,12 +624,25 @@ async function hoverForCommentTrigger(lineElement: Element): Promise<HTMLElement
   for (const type of ["mouseover", "mouseenter", "mousemove"]) {
     cell.dispatchEvent(new MouseEvent(type, options));
   }
-  for (let attempt = 0; attempt < 8; attempt += 1) {
-    await new Promise((resolve) => window.setTimeout(resolve, 100));
-    const trigger = findCommentTrigger(lineElement);
-    if (trigger) return trigger;
-  }
-  return undefined;
+}
+
+// React buttons can ignore a bare synthetic click; replay the full pointer
+// gesture (verified to open the /changes comment composer via console repro).
+function dispatchFullClick(trigger: HTMLElement): void {
+  const rect = trigger.getBoundingClientRect();
+  const options = {
+    bubbles: true,
+    cancelable: true,
+    clientX: rect.x + Math.min(4, rect.width / 2),
+    clientY: rect.y + Math.min(4, rect.height / 2),
+    button: 0,
+  };
+  trigger.dispatchEvent(new PointerEvent("pointerdown", { ...options, pointerId: 1 }));
+  trigger.dispatchEvent(new MouseEvent("mousedown", options));
+  trigger.focus();
+  trigger.dispatchEvent(new PointerEvent("pointerup", { ...options, pointerId: 1 }));
+  trigger.dispatchEvent(new MouseEvent("mouseup", options));
+  trigger.dispatchEvent(new MouseEvent("click", options));
 }
 
 function waitForNewComposer(
@@ -684,8 +715,12 @@ async function draftNativeComment(anchor: DiffAnchor, body: string): Promise<Com
   const trigger = findCommentTrigger(lineElement) ?? await hoverForCommentTrigger(lineElement);
   if (!file || !trigger) return { ok: false, error: "composer-not-found" };
   const existing = new Set(document.querySelectorAll(COMMENT_COMPOSER_SELECTOR));
-  trigger.click();
-  const composer = await waitForNewComposer(file, existing);
+  dispatchFullClick(trigger);
+  let composer = await waitForNewComposer(file, existing);
+  if (!composer) {
+    trigger.click();
+    composer = await waitForNewComposer(file, existing, 1_500);
+  }
   if (!composer) return { ok: false, error: "composer-not-found" };
   fillCommentComposer(composer, body.trim());
   return { ok: true, status: "drafted" };
