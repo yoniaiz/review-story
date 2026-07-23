@@ -1,5 +1,12 @@
 # Review Story — agent instructions
 
+## Decision records
+
+Before designing or implementing changes, read `.primer/decisions/` —
+settled product decisions live there. Do not reverse a recorded decision
+without flagging it explicitly; propose amendments as changes to the
+records themselves (human-ratified via PR, per decision 005).
+
 ## Pull request context block (dogfooding our own product)
 
 When creating or updating a pull request, include a ` ```primer-context ` block

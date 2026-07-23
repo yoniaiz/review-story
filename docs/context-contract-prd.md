@@ -215,9 +215,14 @@ authoring moment is half-memory.
    The safeguards stand as ratification conditions: the bot **proposes**
    the graduation PR, a human merges it — never silent commits, so every
    record is human-ratified and the rot objection is answered by the same
-   review process the records describe. The dogfood experiment (authoring
-   with vs. without the corpus in context) remains worth running — now to
-   *tune* the record format, not to decide whether to build.
+   review process the records describe. **The dogfood experiment ran
+   2026-07-24 and validated the decision decisively** — in a docs-stripped
+   repo, agents without the corpus confidently rebuilt explicitly-rejected
+   designs; with six records + a 3-line pointer they produced
+   citation-backed pushback and decision-compatible alternatives, at lower
+   cost than the documentation-rich control. Full results and format
+   lessons: `docs/experiments/2026-07-24-decision-corpus-dogfood.md`. This
+   repo's `.primer/decisions/` is now the first production corpus.
 3. **Per-PR context**: never git (settled in §4.5). Note this concedes
    that PR N+1's authoring agent cannot see PR N's context block — which
    makes decision memory (item 2) the only channel by which anything
