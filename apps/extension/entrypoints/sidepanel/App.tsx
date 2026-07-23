@@ -927,23 +927,8 @@ function ReviewConversation({ context, plan, session, client, onSessionChange }:
       setComposerValue("");
       setDraftFeedback({
         tone: "success",
-        message: "Pending review comment created — it stays private until you submit the review on GitHub.",
+        message: "Pending review comment created — refresh the PR to see it. It stays private until you submit the review.",
       });
-      // GitHub's page renders from its own client cache and never learns
-      // about API-created comments, so reload the PR tab anchored to the
-      // commented line to make the pending comment visible immediately.
-      try {
-        const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
-        if (tab?.id !== undefined && tab.url && new URL(tab.url).pathname.includes("/pull/")) {
-          const fragment = await createGitHubDiffFragment(anchor.path, anchor.line, anchor.side);
-          const target = new URL(tab.url);
-          target.hash = fragment;
-          await browser.tabs.update(tab.id, { url: target.href });
-          await browser.tabs.reload(tab.id);
-        }
-      } catch {
-        // Reload is best-effort; the comment exists either way.
-      }
     } catch (error) {
       const message = error instanceof Error ? error.message : "";
       const installUrl = /App to be installed/i.test(message)
