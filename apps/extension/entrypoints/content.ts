@@ -185,6 +185,27 @@ function readHeadSha(): string | undefined {
       ?? element?.getAttribute("data-head-sha");
     if (value && /^[a-f0-9]{7,64}$/i.test(value)) return value;
   }
+  return headShaFromDiffUrls();
+}
+
+// GitHub's current PR markup no longer exposes the head SHA as a meta tag or
+// data attribute; it only appears inside diff-service URLs, e.g.
+// `?end_commit_oid=<head>`, `?sha2=<head>`, and `/diffs/<base>..<head>`.
+function headShaFromDiffUrls(): string | undefined {
+  const urlAttributes = ["href", "src", "action", "data-url"] as const;
+  const markers = ["end_commit_oid=", "sha2=", "/diffs/"];
+  const selector = urlAttributes
+    .flatMap((attribute) => markers.map((marker) => `[${attribute}*="${marker}"]`))
+    .join(",");
+  for (const element of document.querySelectorAll(selector)) {
+    for (const attribute of urlAttributes) {
+      const value = element.getAttribute(attribute);
+      if (!value) continue;
+      const match = value.match(/(?:end_commit_oid|sha2)=([a-f0-9]{7,64})/i)
+        ?? value.match(/\/diffs\/[a-f0-9]{7,64}\.\.([a-f0-9]{7,64})/i);
+      if (match?.[1]) return match[1];
+    }
+  }
   return undefined;
 }
 
