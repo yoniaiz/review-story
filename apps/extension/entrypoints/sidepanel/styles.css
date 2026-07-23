@@ -179,6 +179,15 @@ button.primary-action { border: 0; cursor: pointer; }
 .draft-feedback.is-error { border-color: #efd2ca; background: #fff8f5; color: var(--risk); }
 .draft-feedback.is-working { border-color: #c8d8f5; background: var(--signal-soft); color: var(--signal); }
 .feedback-action { flex: none; margin-left: auto; padding: 3px 9px; border: 1px solid currentColor; border-radius: 6px; background: none; color: inherit; font: inherit; font-size: 9px; cursor: pointer; }
+.author-context { max-width: 680px; margin: 0 auto 14px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); font-size: 10px; line-height: 1.5; }
+.author-context summary { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; cursor: pointer; list-style: none; }
+.author-context summary::-webkit-details-marker { display: none; }
+.author-context-provenance { color: var(--muted); font-size: 8.5px; }
+.author-context-intent { margin: 8px 0 0; }
+.author-context-list { margin: 7px 0 0; padding-left: 15px; }
+.author-context-list li { margin-bottom: 4px; }
+.author-context-note { margin: 7px 0 0; color: var(--muted); }
+.author-context-invalid { max-width: 680px; margin: 0 auto 14px; }
 .feedback-action:hover { background: rgba(255,255,255,.5); }
 .composer { width: 100%; max-width: 680px; margin: 0 auto; padding: 11px 11px 8px 13px; border: 1px solid #b8bcb6; border-radius: 13px; background: var(--surface); }
 .composer:focus-within { border-color: var(--signal); box-shadow: 0 0 0 3px var(--signal-soft); }

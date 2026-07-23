@@ -6,6 +6,7 @@ import cors from "@fastify/cors";
 import { createAnalyzer } from "@review-story/analyzer";
 import {
   AnalyzeRequestSchema,
+  parsePrimerContext,
   type Analyzer,
   type StoryStreamEvent,
 } from "@review-story/contracts";
@@ -135,6 +136,28 @@ export async function buildApp(
         return { installed, ...(installUrl ? { installUrl } : {}) };
       } catch (error) {
         return githubTokenFailure(reply, error);
+      }
+    },
+  );
+
+  // The author's primer-context block, parsed out of the PR description.
+  // Everything in it is author testimony — the panel labels it as claims.
+  app.get<{ Params: StoryRouteParams }>(
+    "/api/github/repos/:owner/:repo/pulls/:pullNumber/context",
+    async (request, reply) => {
+      const requestData = parseRouteParams(request.params);
+      if (!requestData.success) return invalidRequest(reply, requestData.error.flatten());
+      try {
+        const token = await githubTokenFor(request);
+        const pull = await githubPullReader.get(
+          requestData.data.owner,
+          requestData.data.repo,
+          requestData.data.pullNumber,
+          token,
+        );
+        return parsePrimerContext(pull.body);
+      } catch (error) {
+        return githubReadFailure(reply, error);
       }
     },
   );

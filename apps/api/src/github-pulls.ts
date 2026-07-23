@@ -6,6 +6,8 @@ export interface GitHubPullSummary {
   headSha: string;
   updatedAt: string;
   author?: string;
+  /** Raw PR description markdown, when GitHub includes it. */
+  body?: string;
 }
 
 export interface GitHubPullReader {
@@ -21,6 +23,7 @@ interface GitHubPullPayload {
   head?: { sha?: string };
   updated_at?: string;
   user?: { login?: string } | null;
+  body?: string | null;
 }
 
 export class GitHubRestPullReader implements GitHubPullReader {
@@ -99,6 +102,7 @@ function parsePull(payload: GitHubPullPayload): GitHubPullSummary {
     headSha: payload.head.sha,
     updatedAt: payload.updated_at,
     ...(payload.user?.login ? { author: payload.user.login } : {}),
+    ...(typeof payload.body === "string" ? { body: payload.body } : {}),
   };
 }
 

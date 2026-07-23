@@ -82,6 +82,17 @@ export class HarnessClient {
     return this.#request("/auth/me", { method: "GET" });
   }
 
+  async getPullContext(
+    owner: string,
+    repo: string,
+    pullNumber: number,
+  ): Promise<import("@review-story/contracts").PrimerContextParseResult> {
+    return this.#request(
+      `/api/github/repos/${segment(owner)}/${segment(repo)}/pulls/${pullNumber}/context`,
+      { method: "GET" },
+    );
+  }
+
   async getAppAccess(owner: string, repo: string): Promise<{ installed: boolean; installUrl?: string }> {
     return this.#request(
       `/api/github/repos/${segment(owner)}/${segment(repo)}/app-access`,

@@ -47,6 +47,8 @@ import {
   type MyPullSummary,
 } from "../../primer/lib/harness-client";
 import { clearStoredAuth, getStoredAuth, signIn, signOut } from "../../primer/lib/auth";
+import { applyAuthorRiskAreas, unmatchedRiskAreas } from "../../primer/lib/author-context";
+import type { PrimerContext, PrimerContextParseResult } from "@review-story/contracts";
 import { isNearScrollEnd } from "../../primer/lib/chat-scroll";
 import { storyArtifactToReviewPlan } from "../../primer/lib/story-review-plan";
 import { upsertGeneratedChapter } from "../../primer/lib/story-stream-state";
@@ -608,13 +610,26 @@ function LiveReview({ context, panelView }: {
     void startReview();
   }, [context.owner, context.pullNumber, context.repository, headSha, reviewIdentity, startReview]);
 
-  const plan = useMemo(() => session?.artifact
-    ? storyArtifactToReviewPlan(
+  const [authorContext, setAuthorContext] = useState<PrimerContextParseResult>();
+  useEffect(() => {
+    let cancelled = false;
+    setAuthorContext(undefined);
+    if (!context.owner || !context.repository || !context.pullNumber) return () => { cancelled = true; };
+    void client.getPullContext(context.owner, context.repository, context.pullNumber)
+      .then((result) => { if (!cancelled) setAuthorContext(result); })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [client, context.owner, context.pullNumber, context.repository]);
+
+  const plan = useMemo(() => {
+    if (!session?.artifact) return undefined;
+    const base = storyArtifactToReviewPlan(
       session.artifact,
       `${context.owner}/${context.repository}`,
       session.completedChapterIds,
-    )
-    : undefined, [context.owner, context.repository, session?.artifact, session?.completedChapterIds]);
+    );
+    return authorContext?.status === "ok" ? applyAuthorRiskAreas(base, authorContext.context) : base;
+  }, [authorContext, context.owner, context.repository, session?.artifact, session?.completedChapterIds]);
   const route = useMemo(() => plan ? getExtensionReviewRoute(plan) : [], [plan]);
   const statuses = useMemo<Record<string, ReviewStepStatus>>(
     () => Object.fromEntries(route.map(({ step }) => [step.fileId, step.status])),
@@ -656,7 +671,7 @@ function LiveReview({ context, panelView }: {
         </Suspense>
       );
     }
-    return <ReviewConversation context={context} plan={plan} session={session} client={client} onSessionChange={setSession} />;
+    return <ReviewConversation context={context} plan={plan} session={session} client={client} onSessionChange={setSession} authorContext={authorContext} />;
   }
 
   const busy = phase !== "idle";
@@ -693,12 +708,55 @@ function LiveReview({ context, panelView }: {
   );
 }
 
-function ReviewConversation({ context, plan, session, client, onSessionChange }: {
+function AuthorContextCard({ context, plan }: { context: PrimerContext; plan: ReviewPlan }) {
+  const unmatched = unmatchedRiskAreas(plan, context);
+  const provenanceLabel = {
+    agent: "Agent-authored",
+    human: "Human-authored",
+    mixed: "Mixed authorship",
+    inferred: "Inferred by Primer",
+  }[context.provenance ?? "human"];
+  return (
+    <details className="author-context">
+      <summary>
+        <span className="utility-label">Author context</span>
+        <span className="author-context-provenance">{provenanceLabel} · claims, not verified</span>
+      </summary>
+      <p className="author-context-intent">{context.intent}</p>
+      {context.decisions?.length ? (
+        <ul className="author-context-list">
+          {context.decisions.map((decision, index) => (
+            <li key={index}>
+              <strong>{decision.choice}</strong>
+              {decision.rejected ? <> — over {decision.rejected}</> : null}
+              {decision.why ? <><br /><small>{decision.why}</small></> : null}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {context.risk_areas?.length ? (
+        <p className="author-context-note">
+          Author-flagged risk areas are raised to “Human attention” in the plan.
+          {unmatched.length ? ` Unmatched paths (stale or mistyped): ${unmatched.join(", ")}.` : ""}
+        </p>
+      ) : null}
+      {context.verification ? (
+        <p className="author-context-note">
+          {context.verification.tested?.length ? `Author reports tested: ${context.verification.tested.join(", ")}. ` : ""}
+          {context.verification.untested?.length ? `Untested: ${context.verification.untested.join(", ")}.` : ""}
+        </p>
+      ) : null}
+    </details>
+  );
+}
+
+function ReviewConversation({ context, plan, session, client, onSessionChange, authorContext }: {
   context: GitHubPageContext;
   plan: ReviewPlan;
   session: HarnessSession;
   client: HarnessClient;
   onSessionChange: (session: HarnessSession) => void;
+  authorContext?: PrimerContextParseResult | undefined;
 }) {
   const repo = `${context.owner}/${context.repository}`;
   const activeFileName = context.activeFile?.split("/").at(-1);
@@ -977,6 +1035,13 @@ function ReviewConversation({ context, plan, session, client, onSessionChange }:
         }}
       >
         <div className="opening-space" aria-hidden="true" />
+        {authorContext?.status === "ok" ? (
+          <AuthorContextCard context={authorContext.context} plan={plan} />
+        ) : authorContext?.status === "invalid" ? (
+          <p className="author-context-note author-context-invalid">
+            This PR carries a primer-context block Primer could not read ({authorContext.reason}).
+          </p>
+        ) : null}
         {!selected ? (
           <article className="agent-turn">
             <div className="trace" aria-hidden="true"><span /></div>
