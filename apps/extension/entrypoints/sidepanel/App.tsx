@@ -891,10 +891,9 @@ function ReviewConversation({ context, plan, session, client, onSessionChange }:
       return;
     }
 
-    // Prefer drafting in GitHub's own inline composer: it renders live and
-    // flows through GitHub's native review-submit UI. Fall back to the API
-    // (which always works but needs a page refresh to render) when the DOM
-    // drive fails — e.g. after a GitHub redesign or on virtualized lines.
+    // Draft in GitHub's own inline composer: it renders live, the user
+    // reviews and edits before anything reaches GitHub, and submission flows
+    // through GitHub's native review UI (Start a review → Submit review).
     try {
       const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
       if (tab?.id !== undefined) {
@@ -913,7 +912,19 @@ function ReviewConversation({ context, plan, session, client, onSessionChange }:
         }
       }
     } catch {
-      // Fall through to the API path.
+      // Fall through to the flagged API path or the error below.
+    }
+
+    // The API path publishes a pending comment directly — no composer
+    // checkpoint — so it stays flagged off while drafting is human-reviewed.
+    // Flip to re-enable as a fallback (comments need a page refresh to show).
+    const API_PUBLISH_FALLBACK = false;
+    if (!API_PUBLISH_FALLBACK) {
+      setDraftFeedback({
+        tone: "error",
+        message: "Could not open GitHub's comment composer on that line. Scroll it into view and try again.",
+      });
+      return;
     }
 
     try {
