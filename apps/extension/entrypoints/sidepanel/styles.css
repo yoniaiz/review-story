@@ -183,13 +183,13 @@ button.primary-action { border: 0; cursor: pointer; }
 .author-context summary { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; cursor: pointer; list-style: none; }
 .author-context summary::-webkit-details-marker { display: none; }
 .author-context-provenance { color: var(--muted); font-size: 8.5px; }
-.author-context-intent { margin: 8px 0 0; }
 .author-context-list { margin: 7px 0 0; padding-left: 15px; }
 .author-context-list li { margin-bottom: 4px; }
 .author-context-note { margin: 7px 0 0; color: var(--muted); }
 .author-context-invalid { max-width: 680px; margin: 0 auto 14px; }
-.author-claim { font-size: 21px; line-height: 1.25; margin: 6px 0 14px; }
+.agent-copy h1.author-claim { font-size: 19px; font-weight: 550; letter-spacing: -.015em; line-height: 1.35; margin: 6px 0 18px; }
 .agent-copy .utility-label { margin-bottom: 2px; }
+.agent-copy .author-claim + .agent-name { margin: 0 0 8px; }
 .author-asks { display: flex; flex-direction: column; gap: 6px; margin: 10px 0 2px; }
 .author-ask-chip { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; padding: 6px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); font: inherit; text-align: left; cursor: pointer; }
 .author-ask-chip:hover:not(:disabled) { border-color: #aeb4ac; }

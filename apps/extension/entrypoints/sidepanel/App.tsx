@@ -743,7 +743,6 @@ function AuthorContextCard({ context, plan }: { context: PrimerContext; plan: Re
         <span className="utility-label">Author context</span>
         <span className="author-context-provenance">{provenanceLabel} · claims, not verified</span>
       </summary>
-      <p className="author-context-intent">{context.intent}</p>
       {context.decisions?.length ? (
         <ul className="author-context-list">
           {context.decisions.map((decision, index) => (
