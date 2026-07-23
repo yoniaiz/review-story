@@ -308,7 +308,18 @@ export async function buildApp(
         await sessions.save(session);
         return draft;
       } catch (error) {
-        return reply.code(502).send({ error: "github_publish_failed", message: error instanceof Error ? error.message : "Unknown error" });
+        const message = error instanceof Error ? error.message : "Unknown error";
+        // GitHub App user tokens can only write to repos where the App is
+        // installed; authorization alone (sign-in) is not enough.
+        if (/Resource not accessible by integration/i.test(message)) {
+          const slug = process.env.GITHUB_APP_SLUG;
+          const installUrl = slug ? `https://github.com/apps/${slug}/installations/new` : undefined;
+          return reply.code(403).send({
+            error: "app_not_installed",
+            message: `Publishing requires the GitHub App to be installed on ${session.owner}/${session.repo}.${installUrl ? ` Install it (or send this link to the repo owner): ${installUrl}` : " Ask the repo owner to install it."}`,
+          });
+        }
+        return reply.code(502).send({ error: "github_publish_failed", message });
       }
     },
   );
