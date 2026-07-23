@@ -452,7 +452,7 @@ export interface MyPullSummary {
   title: string;
   updatedAt: string;
   author?: string;
-  role: "review-requested" | "assigned";
+  role: "review-requested" | "assigned" | "authored";
 }
 
 /** The same queries GitHub's own "Pull requests" dashboard uses. */
@@ -460,6 +460,7 @@ async function searchMyPulls(token: string): Promise<MyPullSummary[]> {
   const roles = [
     { role: "review-requested" as const, qualifier: "review-requested:@me" },
     { role: "assigned" as const, qualifier: "assignee:@me" },
+    { role: "authored" as const, qualifier: "author:@me" },
   ];
   const results = await Promise.all(roles.map(async ({ role, qualifier }) => {
     const query = new URLSearchParams({

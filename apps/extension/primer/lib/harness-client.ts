@@ -63,7 +63,7 @@ export interface MyPullSummary {
   title: string;
   updatedAt: string;
   author?: string;
-  role: "review-requested" | "assigned";
+  role: "review-requested" | "assigned" | "authored";
 }
 
 export interface HarnessViewer {

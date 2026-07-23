@@ -324,7 +324,7 @@ function ReviewQueue({ onExpired }: { onExpired: () => void }) {
           <span>
             <span>{pull.owner}/{pull.repo} · #{pull.number}</span>
             <small>
-              {pull.role === "review-requested" ? "Review requested" : "Assigned"}
+              {pull.role === "review-requested" ? "Review requested" : pull.role === "assigned" ? "Assigned" : "Your PR"}
               {" · updated "}{new Date(pull.updatedAt).toLocaleDateString()}
             </small>
           </span>
