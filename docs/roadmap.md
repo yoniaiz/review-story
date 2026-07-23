@@ -89,7 +89,7 @@ _Last updated: 2026-07-23 (branch `eric-post-hackathon`, PR yoniaiz/review-story
   the Review Brief's human-review mission. Partially shipped on
   `eric-context-contract` / PR #16 (parser, context endpoint, unified brief,
   elevation-only risk merge); see PRD §11 for the honest inventory.
-- [ ] **Authoring-side emitter chain** (PRD §5.5 — "the moment the PR
+- [ ] **Authoring-side emitter chain** (PRD §5.5; build spec: [`context-contract-implementation.md`](context-contract-implementation.md) — "the moment the PR
   description is written is the last moment the authoring context exists").
   The repo is the universal adapter: one setup PR ships every emitter, and
   the contract is the description's *skeleton*, not an attachment.
