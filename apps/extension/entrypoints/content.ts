@@ -120,10 +120,50 @@ function readFilePath(element: Element): string | undefined {
   const label = element.querySelector<HTMLElement>(
     "[data-file-path], [data-path], .file-info a, a.Link--primary[href*='#diff-']",
   );
-  return normalizeGitHubFilePath(label?.getAttribute("data-file-path")
+  const labelled = normalizeGitHubFilePath(label?.getAttribute("data-file-path")
     ?? label?.getAttribute("data-path")
     ?? label?.textContent?.trim()
     ?? undefined);
+  if (labelled) return labelled;
+
+  // GitHub's /changes diff UI names file containers only by their
+  // `diff-<sha256(path)>` id; resolve it through the precomputed index.
+  indexDiffAnchorPaths();
+  const anchorId = element.id || element.getAttribute("data-diff-anchor") || "";
+  return diffAnchorPaths.get(anchorId);
+}
+
+// `diff-<sha256(path)>` → path, built from every changed-file path the page
+// discloses (embedded JSON payloads and legacy data attributes). Digests are
+// async, so the map fills a beat after indexing; publishes are frequent
+// enough that the next one resolves.
+const diffAnchorPaths = new Map<string, string>();
+const indexedCandidatePaths = new Set<string>();
+let lastPathIndexAt = 0;
+
+function indexDiffAnchorPaths(): void {
+  const now = Date.now();
+  if (now - lastPathIndexAt < 3_000) return;
+  lastPathIndexAt = now;
+  const candidates = new Set<string>();
+  for (const element of document.querySelectorAll("[data-file-path], .file[data-path]")) {
+    const value = element.getAttribute("data-file-path") ?? element.getAttribute("data-path");
+    if (value) candidates.add(value);
+  }
+  for (const script of document.querySelectorAll("script")) {
+    const text = script.textContent;
+    if (!text || text.length < 32) continue;
+    for (const match of text.matchAll(/"(?:path|filePath)"\s*:\s*"([^"\\]{1,512})"/g)) {
+      candidates.add(match[1]!);
+    }
+  }
+  for (const path of candidates) {
+    if (indexedCandidatePaths.has(path)) continue;
+    indexedCandidatePaths.add(path);
+    void createGitHubDiffFragment(path).then((fragment) => {
+      diffAnchorPaths.set(fragment, path);
+    });
+  }
 }
 
 function findVisibleFile(): string | undefined {
@@ -185,7 +225,26 @@ function readHeadSha(): string | undefined {
       ?? element?.getAttribute("data-head-sha");
     if (value && /^[a-f0-9]{7,64}$/i.test(value)) return value;
   }
-  return headShaFromDiffUrls();
+  return headShaFromDiffUrls() ?? headShaFromEmbeddedJson();
+}
+
+// GitHub's /changes diff UI only discloses the head SHA inside embedded JSON
+// payloads ("headSha"/"headOid"/"newCommitOid"). Script scanning is costly on
+// large PRs, so cache per pathname.
+let cachedHeadSha: { key: string; value: string } | undefined;
+
+function headShaFromEmbeddedJson(): string | undefined {
+  if (cachedHeadSha?.key === window.location.pathname) return cachedHeadSha.value;
+  for (const script of document.querySelectorAll("script")) {
+    const text = script.textContent;
+    if (!text || text.length < 64) continue;
+    const match = text.match(/"(?:headSha|headOid|newCommitOid)"\s*:\s*"([a-f0-9]{7,64})"/);
+    if (match?.[1]) {
+      cachedHeadSha = { key: window.location.pathname, value: match[1] };
+      return match[1];
+    }
+  }
+  return undefined;
 }
 
 // GitHub's current PR markup no longer exposes the head SHA as a meta tag or
