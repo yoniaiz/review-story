@@ -28,6 +28,22 @@ _Last updated: 2026-07-23 (branch `eric-post-hackathon`, PR yoniaiz/review-story
   `EXTENSION_IDS`) vs. shared unpacked build.
 - [ ] Prod data posture: `REVIEW_SESSION_STORE=supabase`, story cache
   location, and a cleanup job for expired `harness_sessions` rows.
+- [ ] **Event-driven App (unlocked by hosting — the "why deploy" story).**
+  The GitHub App is currently auth-only; its webhook half is off (design
+  decision D5 deferred it, correctly, for the hackathon). A public API
+  endpoint enables `pull_request` event subscriptions, which chain into:
+  1. *Check-run on opened/edited*: parse the primer-context block, post
+     "context block present and valid ✓ / missing ⚠" — enforcement-ladder
+     level 2 from the context-contract PRD, and immediate authoring-side
+     feedback that the block landed. First thing to build post-deploy.
+  2. *Pre-generation on opened*: story ready before the first reviewer
+     arrives (the primer brief's "before the reviewer arrives" section);
+     first panel open becomes instant instead of 60–90 s.
+  3. *Delta/invalidations on synchronize*: new pushes trigger regeneration
+     and feed the round-2 experience instead of relying only on SHA polling.
+  Until then the flow stays pull-based: the panel fetches the PR body fresh
+  on open, so block edits appear at next panel open — seamless enough for
+  dogfooding, not for the product.
 
 ## Product — design-doc gaps (review-story-design.md §4, §9, §11)
 
