@@ -1,8 +1,12 @@
-# Primer Context Contract — PRD (v1 draft)
+# Primer Context Contract — PRD (v1.1 draft)
 
-**Status:** proposal for team review (Eric, Yoni, Itay) · not yet ratified
+**Status:** proposal for team review (Eric, Yoni, Itay) · not yet ratified ·
+Tier 2/3 partially implemented and dogfooded (see §11)
 **Depends on:** `review-story-design.md` (core product), `docs/roadmap.md` (Review Brief), `PRODUCT_REVIEW_BRIEF.md` in `erl-jpg/codex-hackathon-primer` (human-review mission, evidence model)
 **Author's note:** market claims verified as of early 2026; re-verify before external use.
+**v1.1 changes:** carrier architecture revised to API-first with the PR-body
+block demoted to ingest/mirror/fallback (§4.5); authoring-side generation and
+enforcement chain specified (§5.5); implementation status added (§11).
 
 ---
 
@@ -58,9 +62,8 @@ Primer's contract is tool-agnostic (any agent, any editor, humans).
 
 ## 4. The contract (v0 shape — freeze after team review)
 
-Carried as a fenced block in the PR body (primary — visible to humans,
-survives with zero infrastructure) or `.primer/context.md` (alternative for
-long content). YAML inside a ` ```primer-context ` fence:
+Interchange format: YAML inside a ` ```primer-context ` fence. Where it
+*lives* is §4.5 — the format is stable across carriers:
 
 ```yaml
 schema: 1
@@ -93,6 +96,40 @@ Design rules:
   scrutiny hint, not a fact.
 - **Human-readable first.** The block must read as a decent PR description
   section even for someone who has never heard of Primer.
+
+## 4.5 Carrier architecture — API-first, body as mirror and fallback (v1.1)
+
+The PR-body block was the right bootstrap (zero infrastructure, works with no
+adoption) and is the wrong **system of record** for a product:
+
+- **No integrity** — anyone with edit rights can rewrite it, silently, and
+  nobody audits GitHub's body-edit history.
+- **Self-declared provenance** — `provenance: agent` is a string anyone can
+  type; the enterprise audit-trail story cannot rest on the honor system.
+- **One mutable blob per PR** — claims are made about a specific head SHA,
+  but the block has no per-push versioning; three pushes later it silently
+  describes code that no longer exists.
+- **Fragile transport** — fenced YAML survives until a body-editing bot or
+  template merge corrupts it.
+- **Pollutes the human artifact** — descriptions are for people.
+
+**Product architecture (requires the hosted API):**
+
+1. Emitters **POST the contract to Primer's API**, authenticated via the
+   GitHub App / user token — provenance becomes a verified fact ("submitted
+   by identity X"), stored keyed by `repo + PR + head SHA` with immutable
+   history per push.
+2. The same emitter writes a **short human-readable summary** into the PR
+   body — a mirror for humans and non-Primer readers, not the record.
+3. Primer's reader **prefers the API record, falls back to parsing the
+   body** — the zero-adoption path (hand-written block, no tooling) keeps
+   working exactly as today; the block demotes from system-of-record to
+   ingestion format + human mirror.
+4. The check-run (§6.5) attests against the API record: "context submitted
+   by authenticated agent X at SHA Y" — the audit-trail claim made honest.
+
+Until the API is hosted, the body block **is** the carrier (current state,
+§11); nothing about the format changes when the API lands.
 
 ## 5. How Primer consumes it
 
@@ -129,6 +166,35 @@ lines. Feeds the Review Brief's "why it matters" section.
 - **Fallback generator**: Primer drafts the block itself from commits + diff
   when absent, labeled `provenance: inferred` — repos with zero adoption
   still get the degraded experience, honestly labeled.
+
+## 5.5 Authoring-side generation — how a PR drives this
+
+The moment the PR description is written is the last moment the authoring
+context still exists; the design intercepts that moment, per tool, with the
+repo as the universal adapter (one "Primer setup PR" ships every file below):
+
+| Tool | Mechanism | Strength |
+|---|---|---|
+| Claude Code | `CLAUDE.md` instructions; optional `/pr` skill that composes description + contract and (post-deploy) POSTs to the API | nudge → strong |
+| Claude Code, enforced | A hook intercepting `gh pr create`: blocks creation when no contract is present — the only authoring-side *hard* gate available today | gate |
+| Cursor | `.cursor/rules` with the same emit instruction | nudge |
+| Codex / other agents | `AGENTS.md` | nudge |
+| Humans | PR template scaffolds the block; their assistant fills it from diff + commits on request | weakest |
+
+Two principles:
+
+- **The contract is the description's skeleton, not an attachment.** The
+  emitting agent writes the PR description *around* intent / decisions /
+  risks — prose for humans wrapping the structured block — so emitting costs
+  nothing extra at the moment the agent already writes a description.
+- **The same repo docs serve both directions.** `CLAUDE.md`, `AGENTS.md`,
+  and the direction docs instruct agents while authoring *and* are what
+  Tier 1 reads at review time; the `alignment` field points back into them.
+  Keeping direction docs current feeds the product directly.
+
+Full enforcement chain (graduated, per repo appetite): generation nudge →
+creation gate (hook) → server check-run flag → required status → inference
+fallback. Solo dev gets the first and last; enterprise flips them all on.
 
 ## 6. Installation & distribution story
 
@@ -184,8 +250,9 @@ write to Jira we are a project-management tool and off-thesis.
 - Not a replacement for tickets/specs — `alignment` may point at them, but
   requirement tracking (Baz's turf) is out of scope.
 - No private-context exfiltration: the emitting skill must not include
-  conversation content beyond the distilled fields; the contract lives in
-  the PR, which is as public as the repo.
+  conversation content beyond the distilled fields; the body mirror is as
+  public as the repo, and the API record carries the same content at the
+  same sensitivity — never more.
 
 ## 8. Risks
 
@@ -196,6 +263,8 @@ write to Jira we are a project-management tool and off-thesis.
 | Nobody adopts the format | Tier 1 + fallback generator deliver value at zero adoption; template is the two-minute on-ramp |
 | Schema churn breaks emitters | `schema: 1` version field; additive evolution only until v2 |
 | GitHub ships the integrated version | Tool-agnosticism; speed; the verification pass (not the format) is the moat |
+| API record and body mirror diverge | Reader prefers the API record and shows a "mirror out of date" note when the body block differs; the mirror is explicitly non-authoritative |
+| Body block tampered after review starts (pre-API, or fallback path) | Per-SHA keying at emission; post-API, the check-run attests the authenticated record and the body is never the record |
 
 ## 9. Validation
 
@@ -211,10 +280,39 @@ write to Jira we are a project-management tool and off-thesis.
 
 1. Ratify the v0 field set — anything missing that authors would actually
    fill? Anything that will rot unfilled?
-2. PR-body block vs `.primer/context.md` as primary?
+2. ~~PR-body block vs `.primer/context.md` as primary?~~ Superseded by §4.5
+   (v1.1): API-first once hosted; body block as ingest/mirror/fallback;
+   `.primer/context.md` dropped unless someone hits the body size limit.
+   Ratify the §4.5 architecture itself.
 3. Does the verification pass run in the analyzer pipeline (Stage 2.5) or as
    part of the future agentic harness (which the roadmap already specs)?
 4. Naming: "Primer Context" / "context contract" / something better — and
    does the fence tag (` ```primer-context `) survive a product rename?
 5. Sequencing vs the Review Brief: build Tier 1 inside the brief work (they
    feed each other), or land the brief first with contract fields stubbed?
+6. The Claude Code `gh pr create` hook (§5.5): ship it in the setup PR as
+   default-on, or opt-in? A hard authoring gate is the strongest guarantee
+   and the most annoying failure mode.
+
+## 11. Implementation status (2026-07-24, branch `eric-context-contract`, PR #16)
+
+Built and dogfooded ahead of ratification — the format needed real usage to
+critique; treat all of it as revisable by team review:
+
+- **Contracts**: `PrimerContextSchema` + `parsePrimerContext` (size-bounded,
+  alias-limited fenced-YAML extraction hardened against hostile PR bodies).
+- **API**: `GET /api/github/repos/:owner/:repo/pulls/:n/context` — parses the
+  body fresh with the caller's token. (Pull-based; the §4.5 POST API and the
+  §6.5 check-run wait on hosting — see the roadmap's event-driven-App chain.)
+- **Panel**: the review opening is a unified brief — author's claim as the
+  provenance-labeled headline, a deterministic one-sentence verdict,
+  expandable chapter route with author-ask highlights, untested warning
+  line, inline decisions disclosure. Author risk areas raise matching files
+  to needs-human (elevation only); stale flagged paths surfaced.
+- **Emitters**: PR template + `CLAUDE.md` live in this repo; PR #16's own
+  description carries the first real block. Cursor/AGENTS.md variants and
+  the `/pr` skill + creation hook are not yet written.
+- **Verification pass**: only the deterministic slices exist (risk-path
+  matching, untested surfacing, stale detection). Test-evidence
+  cross-referencing and intent-vs-diff checking are unbuilt (open question
+  3 decides where they run).
