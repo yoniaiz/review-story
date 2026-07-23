@@ -27,9 +27,10 @@ interface AccessTokenPayload {
 export class GitHubOAuthClient {
   readonly #clientId: string;
   readonly #clientSecret: string;
+  readonly #appSlug: string | undefined;
   readonly #fetch: typeof fetch;
 
-  constructor(options: { clientId?: string; clientSecret?: string; fetchImplementation?: typeof fetch } = {}) {
+  constructor(options: { clientId?: string; clientSecret?: string; appSlug?: string; fetchImplementation?: typeof fetch } = {}) {
     const clientId = options.clientId ?? process.env.GITHUB_APP_CLIENT_ID;
     const clientSecret = options.clientSecret ?? process.env.GITHUB_APP_CLIENT_SECRET;
     if (!clientId || !clientSecret) {
@@ -37,10 +38,21 @@ export class GitHubOAuthClient {
     }
     this.#clientId = clientId;
     this.#clientSecret = clientSecret;
+    this.#appSlug = options.appSlug ?? process.env.GITHUB_APP_SLUG ?? undefined;
     this.#fetch = options.fetchImplementation ?? fetch;
   }
 
   authorizeUrl(state: string, callbackUrl: string): string {
+    // With a slug configured (and "Request user authorization during
+    // installation" enabled on the App), send users through the combined
+    // install + authorize screen so sign-in also grants repo write access.
+    // GitHub passes `state` through and redirects to the App's configured
+    // callback URL with a code, exactly like the plain authorize flow.
+    if (this.#appSlug) {
+      const url = new URL(`https://github.com/apps/${this.#appSlug}/installations/new`);
+      url.searchParams.set("state", state);
+      return url.toString();
+    }
     const url = new URL("https://github.com/login/oauth/authorize");
     url.searchParams.set("client_id", this.#clientId);
     url.searchParams.set("redirect_uri", callbackUrl);
