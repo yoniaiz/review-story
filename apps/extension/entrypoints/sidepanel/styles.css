@@ -188,6 +188,14 @@ button.primary-action { border: 0; cursor: pointer; }
 .author-context-list li { margin-bottom: 4px; }
 .author-context-note { margin: 7px 0 0; color: var(--muted); }
 .author-context-invalid { max-width: 680px; margin: 0 auto 14px; }
+.author-claim { font-size: 21px; line-height: 1.25; margin: 6px 0 14px; }
+.agent-copy .utility-label { margin-bottom: 2px; }
+.author-asks { display: flex; flex-direction: column; gap: 6px; margin: 10px 0 2px; }
+.author-ask-chip { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; padding: 6px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); font: inherit; text-align: left; cursor: pointer; }
+.author-ask-chip:hover:not(:disabled) { border-color: #aeb4ac; }
+.author-ask-chip:disabled { cursor: default; opacity: .6; }
+.author-ask-chip code { font-size: 10px; }
+.author-ask-chip small { color: var(--muted); font-size: 9px; }
 .feedback-action:hover { background: rgba(255,255,255,.5); }
 .composer { width: 100%; max-width: 680px; margin: 0 auto; padding: 11px 11px 8px 13px; border: 1px solid #b8bcb6; border-radius: 13px; background: var(--surface); }
 .composer:focus-within { border-color: var(--signal); box-shadow: 0 0 0 3px var(--signal-soft); }

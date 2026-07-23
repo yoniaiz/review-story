@@ -708,6 +708,27 @@ function LiveReview({ context, panelView }: {
   );
 }
 
+/** Primer's deterministic reaction to the author's claim — only states what
+ * the plan data supports; no generated judgment. */
+function primerReaction(context: PrimerContext, plan: ReviewPlan): string {
+  const parts: string[] = [];
+  const untested = context.verification?.untested ?? [];
+  const matchedRisks = (context.risk_areas ?? [])
+    .filter((area) => plan.files.some(({ path }) => path === area.path));
+  parts.push(`I mapped this claim across ${plan.chapters.length} chapters.`);
+  if (matchedRisks.length) {
+    parts.push(`The author flags ${matchedRisks.length === 1 ? "one area" : `${matchedRisks.length} areas`} for your judgment — I raised ${matchedRisks.length === 1 ? "it" : "them"} to “Human attention” below.`);
+  }
+  if (untested.length) {
+    parts.push(`The author reports untested: ${untested.join(", ")} — weigh that where the claim depends on it.`);
+  }
+  const stale = unmatchedRiskAreas(plan, context);
+  if (stale.length) {
+    parts.push(`Flagged paths not in this diff (possibly stale): ${stale.join(", ")}.`);
+  }
+  return parts.join(" ");
+}
+
 function AuthorContextCard({ context, plan }: { context: PrimerContext; plan: ReviewPlan }) {
   const unmatched = unmatchedRiskAreas(plan, context);
   const provenanceLabel = {
@@ -1035,14 +1056,30 @@ function ReviewConversation({ context, plan, session, client, onSessionChange, a
         }}
       >
         <div className="opening-space" aria-hidden="true" />
-        {authorContext?.status === "ok" ? (
-          <AuthorContextCard context={authorContext.context} plan={plan} />
-        ) : authorContext?.status === "invalid" ? (
+        {authorContext?.status === "invalid" ? (
           <p className="author-context-note author-context-invalid">
             This PR carries a primer-context block Primer could not read ({authorContext.reason}).
           </p>
         ) : null}
-        {!selected ? (
+        {!selected && authorContext?.status === "ok" ? (
+          <article className="agent-turn">
+            <div className="trace" aria-hidden="true"><span /></div>
+            <div className="agent-copy">
+              <p className="utility-label">
+                Author’s claim · {{
+                  agent: "agent-authored",
+                  human: "human-authored",
+                  mixed: "mixed authorship",
+                  inferred: "inferred by Primer",
+                }[authorContext.context.provenance ?? "human"]} · unverified
+              </p>
+              <h1 className="author-claim">{authorContext.context.intent}</h1>
+              <p className="agent-name"><Sparkles size={13} /> Primer</p>
+              <p>{primerReaction(authorContext.context, plan)}</p>
+            </div>
+          </article>
+        ) : null}
+        {!selected && authorContext?.status !== "ok" ? (
           <article className="agent-turn">
             <div className="trace" aria-hidden="true"><span /></div>
             <div className="agent-copy">
@@ -1091,7 +1128,33 @@ function ReviewConversation({ context, plan, session, client, onSessionChange, a
               <span><b>{plan.stats.totalFiles}</b> files</span>
               <span><b>{plan.stats.chapters}</b> chapters</span>
               <span><b>{plan.stats.noiseFiles}</b> low signal</span>
+              {(() => {
+                const deep = plan.graph.nodes.filter(({ severity }) => severity === "needs-human").length;
+                return deep ? <span><b>{deep}</b> deep read{deep === 1 ? "" : "s"}</span> : null;
+              })()}
             </div>
+            {authorContext?.status === "ok" && (authorContext.context.risk_areas?.length ?? 0) > 0 ? (
+              <div className="author-asks">
+                <span className="utility-label">The author asks you to check</span>
+                {authorContext.context.risk_areas!
+                  .filter((area) => plan.files.some(({ path }) => path === area.path))
+                  .map((area) => {
+                    const index = findRouteIndexByPath(route, area.path);
+                    return (
+                      <button
+                        key={area.path}
+                        className="author-ask-chip"
+                        type="button"
+                        disabled={index < 0}
+                        onClick={() => { if (index >= 0) void navigateTo(index); }}
+                      >
+                        <code>{area.path.split("/").at(-1)}</code>
+                        {area.note ? <small>{area.note}</small> : null}
+                      </button>
+                    );
+                  })}
+              </div>
+            ) : null}
             <p>This overview applies to the whole pull request. Step conversations open on their own page, scoped to a single review step.</p>
             {route.length ? (
               <button className="begin-review" type="button" onClick={() => void navigateTo(0)}>
@@ -1099,6 +1162,9 @@ function ReviewConversation({ context, plan, session, client, onSessionChange, a
               </button>
             ) : null}
           </section>
+        ) : null}
+        {!selected && authorContext?.status === "ok" ? (
+          <AuthorContextCard context={authorContext.context} plan={plan} />
         ) : null}
 
         {selected ? (
