@@ -48,7 +48,7 @@ import {
 } from "../../primer/lib/harness-client";
 import { clearStoredAuth, getStoredAuth, signIn, signOut } from "../../primer/lib/auth";
 import { applyAuthorRiskAreas, unmatchedRiskAreas } from "../../primer/lib/author-context";
-import type { PrimerContext, PrimerContextParseResult } from "@review-story/contracts";
+import type { PrimerContextParseResult } from "@review-story/contracts";
 import { isNearScrollEnd } from "../../primer/lib/chat-scroll";
 import { storyArtifactToReviewPlan } from "../../primer/lib/story-review-plan";
 import { upsertGeneratedChapter } from "../../primer/lib/story-stream-state";
@@ -728,47 +728,6 @@ function reviewVerdict(plan: ReviewPlan, authorContext?: PrimerContextParseResul
   return `${attention}${asks}.${staleNote}`;
 }
 
-function AuthorContextCard({ context, plan }: { context: PrimerContext; plan: ReviewPlan }) {
-  const unmatched = unmatchedRiskAreas(plan, context);
-  const provenanceLabel = {
-    agent: "Agent-authored",
-    human: "Human-authored",
-    mixed: "Mixed authorship",
-    inferred: "Inferred by Primer",
-  }[context.provenance ?? "human"];
-  return (
-    <details className="author-context">
-      <summary>
-        <span className="utility-label">Author context</span>
-        <span className="author-context-provenance">{provenanceLabel} · claims, not verified</span>
-      </summary>
-      {context.decisions?.length ? (
-        <ul className="author-context-list">
-          {context.decisions.map((decision, index) => (
-            <li key={index}>
-              <strong>{decision.choice}</strong>
-              {decision.rejected ? <> — over {decision.rejected}</> : null}
-              {decision.why ? <><br /><small>{decision.why}</small></> : null}
-            </li>
-          ))}
-        </ul>
-      ) : null}
-      {context.risk_areas?.length ? (
-        <p className="author-context-note">
-          Author-flagged risk areas are raised to “Human attention” in the plan.
-          {unmatched.length ? ` Unmatched paths (stale or mistyped): ${unmatched.join(", ")}.` : ""}
-        </p>
-      ) : null}
-      {context.verification ? (
-        <p className="author-context-note">
-          {context.verification.tested?.length ? `Author reports tested: ${context.verification.tested.join(", ")}. ` : ""}
-          {context.verification.untested?.length ? `Untested: ${context.verification.untested.join(", ")}.` : ""}
-        </p>
-      ) : null}
-    </details>
-  );
-}
-
 function ReviewConversation({ context, plan, session, client, onSessionChange, authorContext }: {
   context: GitHubPageContext;
   plan: ReviewPlan;
@@ -805,6 +764,7 @@ function ReviewConversation({ context, plan, session, client, onSessionChange, a
     action?: { label: string; url: string };
   }>();
   const [appAccess, setAppAccess] = useState<{ installed: boolean; installUrl?: string }>();
+  const [expandedChapterId, setExpandedChapterId] = useState<string>();
 
   useEffect(() => {
     let cancelled = false;
@@ -1090,21 +1050,25 @@ function ReviewConversation({ context, plan, session, client, onSessionChange, a
               <ol className="brief-route">
                 {plan.chapters.map((chapter) => {
                   const index = findChapterEntryRouteIndex(route, chapter);
+                  const expanded = expandedChapterId === chapter.id;
+                  const severity = plan.graph.nodes.find(({ chapterId }) => chapterId === chapter.id)?.severity;
                   const asks = authorContext?.status === "ok"
                     ? (authorContext.context.risk_areas ?? []).filter((area) =>
                       plan.files.some((file) => file.path === area.path && file.chapterId === chapter.id))
                     : [];
                   return (
-                    <li key={chapter.id}>
+                    <li key={chapter.id} className={expanded ? "is-expanded" : ""}>
                       <button
                         className="brief-route-step"
                         type="button"
-                        disabled={index < 0}
-                        onClick={() => { if (index >= 0) void navigateTo(index); }}
+                        aria-expanded={expanded}
+                        onClick={() => setExpandedChapterId(expanded ? undefined : chapter.id)}
                       >
                         <span className="brief-route-title">
                           {chapter.title}
-                          <small>{chapter.fileIds.length} files</small>
+                          <small>{chapter.fileIds.length} files{severity === "needs-human" ? " · deep read" : ""}</small>
+                          {asks.length ? <i className="brief-route-flag" aria-label="Author-flagged" /> : null}
+                          <ChevronDown size={13} className="brief-route-chevron" />
                         </span>
                         {asks.map((ask) => (
                           <span className="brief-route-ask" key={ask.path}>
@@ -1112,6 +1076,17 @@ function ReviewConversation({ context, plan, session, client, onSessionChange, a
                           </span>
                         ))}
                       </button>
+                      {expanded ? (
+                        <div className="brief-route-detail">
+                          <p>{chapter.summary}</p>
+                          <p className="brief-route-entry">Entry point: <code>{chapter.entryPoint}</code></p>
+                          {index >= 0 ? (
+                            <button className="brief-route-open" type="button" onClick={() => void navigateTo(index)}>
+                              Open this chapter <ArrowRight size={12} />
+                            </button>
+                          ) : null}
+                        </div>
+                      ) : null}
                     </li>
                   );
                 })}
@@ -1120,6 +1095,20 @@ function ReviewConversation({ context, plan, session, client, onSessionChange, a
                 <p className="brief-untested">
                   ⚠ Author reports untested: {authorContext.context.verification.untested.join(", ")}.
                 </p>
+              ) : null}
+              {authorContext?.status === "ok" && authorContext.context.decisions?.length ? (
+                <details className="brief-decisions">
+                  <summary>Author’s decisions ({authorContext.context.decisions.length})</summary>
+                  <ul>
+                    {authorContext.context.decisions.map((decision, index) => (
+                      <li key={index}>
+                        <strong>{decision.choice}</strong>
+                        {decision.rejected ? <> — over {decision.rejected}</> : null}
+                        {decision.why ? <><br /><small>{decision.why}</small></> : null}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
               ) : null}
               {route.length ? (
                 <button className="begin-review" type="button" onClick={() => void navigateTo(0)}>
@@ -1157,9 +1146,6 @@ function ReviewConversation({ context, plan, session, client, onSessionChange, a
         </section>
         ) : null}
 
-        {!selected && authorContext?.status === "ok" ? (
-          <AuthorContextCard context={authorContext.context} plan={plan} />
-        ) : null}
 
         {selected ? (
           <section className="review-step-card">

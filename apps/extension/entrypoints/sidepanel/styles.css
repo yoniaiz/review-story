@@ -202,6 +202,21 @@ button.primary-action { border: 0; cursor: pointer; }
 .brief-route-title small { color: var(--quiet); font-size: 9px; font-weight: 400; }
 .brief-route-ask { color: var(--warning); font-size: 9.5px; }
 .brief-untested { margin: 12px 0 0; color: var(--warning); font-size: 10px; line-height: 1.5; }
+.brief-route-flag { width: 6px; height: 6px; margin-left: 2px; border-radius: 50%; background: var(--warning); }
+.brief-route-chevron { margin-left: auto; color: var(--quiet); transition: transform .15s; }
+.brief-route li.is-expanded .brief-route-chevron { transform: rotate(180deg); }
+.brief-route li.is-expanded .brief-route-step { border-bottom-color: transparent; }
+.brief-route-detail { padding: 0 10px 12px 30px; border-bottom: 1px solid var(--line-soft); font-size: 10.5px; line-height: 1.55; }
+.brief-route-detail p { margin: 0 0 7px; }
+.brief-route-entry { color: var(--muted); font-size: 9.5px; }
+.brief-route-entry code { font-size: 9px; }
+.brief-route-open { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); font: inherit; font-size: 10px; cursor: pointer; }
+.brief-route-open:hover { border-color: #aeb4ac; }
+.brief-decisions { margin: 12px 0 0; font-size: 10px; }
+.brief-decisions summary { color: var(--muted); cursor: pointer; }
+.brief-decisions ul { margin: 7px 0 0; padding-left: 15px; }
+.brief-decisions li { margin-bottom: 5px; line-height: 1.5; }
+.brief-decisions small { color: var(--muted); }
 .agent-copy .begin-review { margin-top: 18px; }
 .feedback-action:hover { background: rgba(255,255,255,.5); }
 .composer { width: 100%; max-width: 680px; margin: 0 auto; padding: 11px 11px 8px 13px; border: 1px solid #b8bcb6; border-radius: 13px; background: var(--surface); }
