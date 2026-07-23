@@ -252,6 +252,8 @@ export function buildChapterCard(
     }
     return {
       path: row.path,
+      additions: row.additions,
+      deletions: row.deletions,
       note:
         modelFile && anchors.length > 0
           ? nonempty(modelFile.note, deterministicFileNote(row))

@@ -1066,10 +1066,22 @@ function ReviewConversation({ context, plan, session, client, onSessionChange, a
                       >
                         <span className="brief-route-title">
                           {chapter.title}
-                          <small>{chapter.fileIds.length} files{severity === "needs-human" ? " · deep read" : ""}</small>
+                          <small>
+                            {chapter.fileIds.length} files
+                            {chapter.additions !== undefined || chapter.deletions !== undefined ? (
+                              <>
+                                {" · "}
+                                <span className="brief-route-added">+{chapter.additions ?? 0}</span>
+                                {" "}
+                                <span className="brief-route-deleted">−{chapter.deletions ?? 0}</span>
+                              </>
+                            ) : null}
+                            {severity === "needs-human" ? " · deep read" : ""}
+                          </small>
                           {asks.length ? <i className="brief-route-flag" aria-label="Author-flagged" /> : null}
                           <ChevronDown size={13} className="brief-route-chevron" />
                         </span>
+                        {!expanded ? <span className="brief-route-summary">{chapter.summary}</span> : null}
                         {asks.map((ask) => (
                           <span className="brief-route-ask" key={ask.path}>
                             author asks: {ask.note ?? ask.path.split("/").at(-1)}

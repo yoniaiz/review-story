@@ -145,6 +145,8 @@
         {
           "path": "src/api/auth/refresh.ts",
           "note": "implements one-time refresh and replay handling",
+          "additions": 128,
+          "deletions": 17,
           "anchor_hunks": [[38, 92]],
           "attention_floor": "STANDARD",
           "imports_changed_files": ["src/db/schema/session.ts", "src/api/auth/client.ts"]
@@ -152,6 +154,8 @@
         {
           "path": "src/api/auth/client.ts",
           "note": "wraps the external identity-provider token exchange",
+          "additions": 24,
+          "deletions": 3,
           "anchor_hunks": [[1, 48]],
           "attention_floor": "SKIM",
           "imports_changed_files": []

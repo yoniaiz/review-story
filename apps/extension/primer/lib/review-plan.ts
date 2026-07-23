@@ -28,6 +28,10 @@ export interface ReviewChapter {
   entryPoint: string;
   fileIds: string[];
   status: ChapterStatus;
+  // Summed diff churn across the chapter's files; absent when the artifact
+  // predates per-file stats.
+  additions?: number;
+  deletions?: number;
   steps?: ReviewStep[];
 }
 

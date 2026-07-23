@@ -58,6 +58,17 @@ describe("story artifact review plan adapter", () => {
     expect(plan.graph.edges).toEqual([]);
   });
 
+  it("sums per-file churn into chapter totals, omitting them when the artifact has none", () => {
+    const artifact = StoryArtifactSchema.parse(artifactFixture);
+    const plan = storyArtifactToReviewPlan(artifact, "acme/review-story-demo");
+    const chapterOf = (id: string) => plan.chapters.find((chapter) => chapter.id === id);
+
+    expect(chapterOf("ch_api")?.additions).toBe(128 + 24);
+    expect(chapterOf("ch_api")?.deletions).toBe(17 + 3);
+    expect(chapterOf("ch_schema")?.additions).toBeUndefined();
+    expect(chapterOf("ch_schema")?.deletions).toBeUndefined();
+  });
+
   it("uses the contract's track chapter order instead of artifact storage order", () => {
     const artifact = StoryArtifactSchema.parse(artifactFixture);
     const reordered = StoryArtifactSchema.parse({
