@@ -157,9 +157,67 @@ host-agnostic, greppable, reviewable as content — fits a different role:
   enforcement level, ignore patterns, conventions) live in the same
   directory when Primer grows configurable behavior.
 
-Status: proposal only — needs design (graduation format, dedup, who
-approves the graduation commit) and team ratification alongside the rest of
-this PRD. Nothing implements it yet.
+### Should anything of Primer's persist into git at all? (open — the
+recorded position is this framework, not an answer)
+
+**The case against putting anything in git:**
+
+- *Dotfile creep is a real cost.* Every tool wants its own directory in the
+  repo, and teams quietly resent each one. A `.primer/` directory is Primer
+  claiming territory in every adopting repo — friction at exactly the
+  adoption moment, and the first thing a skeptical engineer sees.
+- *Auto-generated memory rots into false authority.* Human-written decision
+  records work because a human decided each one deserved permanence.
+  Bot-written files that nobody curates become stale-but-official — worse
+  than nothing, because agents and reviewers will trust them. The failure
+  mode is not clutter; it is confidently wrong context with a commit
+  history.
+- *It is all derivable.* Every graduated decision already exists in PR
+  history and (post-hosting) in Primer's per-SHA records. Storing it twice
+  creates a divergence problem we then have to manage.
+- *"Let a bot commit to your repo" is a much bigger ask* than "read our
+  panel."
+
+**The case for — one argument, and it is the one that matters:**
+
+*Authoring agents only read the repo.* Claude Code, Cursor, Codex — their
+entire context universe while writing code is repo files. They never query
+Primer's API mid-session. If the decision corpus lives only in our
+database, it informs review but never authoring — the agent writing the
+next PR cannot know "we chose composer-first and rejected API-first" unless
+that fact is in a file. `CLAUDE.md` produced PR #16's context block with
+zero extra machinery *because it is in git*. Memory that cannot reach the
+authoring moment is half-memory.
+
+**The decision rule (apply per artifact):**
+
+> Does an authoring agent or human need it *while writing code*? → git.
+> Is it about one PR at one SHA? → never git (body/API — settled).
+> Is it derivable at review time? → Primer's database, not git.
+
+**Applied:**
+
+1. **Config** (`.primer/config.yaml`): git, clearly — universal precedent
+   (`.coderabbit.yaml`, `renovate.json`), tiny, human-edited, and policy
+   changes (e.g. enforcement level) should themselves go through PR review.
+   Safe to decide whenever config exists to store — which is not yet.
+2. **Decision memory** (`.primer/decisions/`): genuinely contested — the
+   recorded position is *undecided*. If it ever ships, only in the form
+   that answers the rot objection: the bot **proposes** a graduation PR, a
+   human merges it — never silent commits, so every record is
+   human-ratified. The honest tiebreaker is empirical: does an authoring
+   agent with the corpus in context produce measurably better PRs and
+   context blocks than one without? Testable on this repo before asking
+   anyone else.
+3. **Per-PR context**: never git (settled in §4.5).
+
+**Decide when two things exist:** the hosted API (which makes the
+database-only alternative real) and one dogfood experiment of authoring
+with versus without a decisions file in context. Evidence, not aesthetics.
+
+Status: §4.6 as a whole is proposal only — needs design (graduation format,
+dedup, who approves the graduation commit) and team ratification alongside
+the rest of this PRD. Nothing implements it yet.
 
 ## 5. How Primer consumes it
 

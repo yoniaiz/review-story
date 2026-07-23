@@ -120,6 +120,12 @@ _Last updated: 2026-07-23 (branch `eric-post-hackathon`, PR yoniaiz/review-story
   proposes the graduation commit); Tier-1 reads the corpus back for
   alignment checks that compound with every merge; `.primer/config.yaml`
   becomes the config home when Primer grows repo-level settings.
+  **Whether anything persists into git at all is deliberately open** —
+  §4.6 records the decision framework (config: yes when it exists;
+  decision memory: undecided, human-ratified graduation PRs only if ever;
+  per-PR context: never) and the two prerequisites for deciding: the
+  hosted API, and a dogfood experiment of authoring with vs. without a
+  decisions file in context.
 - [ ] **Review Brief** (team decision needed) — the pre-review screen from
   primer's `PRODUCT_REVIEW_BRIEF.md`: *what changed, why it matters, what
   requires me, why trust this route* — with a reconciling scope funnel
