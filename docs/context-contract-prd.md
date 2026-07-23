@@ -157,8 +157,8 @@ host-agnostic, greppable, reviewable as content — fits a different role:
   enforcement level, ignore patterns, conventions) live in the same
   directory when Primer grows configurable behavior.
 
-### Should anything of Primer's persist into git at all? (open — the
-recorded position is this framework, not an answer)
+### Should anything of Primer's persist into git? (framework + per-artifact
+rulings; decision memory decided 2026-07-24, pending team ratification)
 
 **The case against putting anything in git:**
 
@@ -201,19 +201,35 @@ authoring moment is half-memory.
    (`.coderabbit.yaml`, `renovate.json`), tiny, human-edited, and policy
    changes (e.g. enforcement level) should themselves go through PR review.
    Safe to decide whenever config exists to store — which is not yet.
-2. **Decision memory** (`.primer/decisions/`): genuinely contested — the
-   recorded position is *undecided*. If it ever ships, only in the form
-   that answers the rot objection: the bot **proposes** a graduation PR, a
-   human merges it — never silent commits, so every record is
-   human-ratified. The honest tiebreaker is empirical: does an authoring
-   agent with the corpus in context produce measurably better PRs and
-   context blocks than one without? Testable on this repo before asking
-   anyone else.
-3. **Per-PR context**: never git (settled in §4.5).
+2. **Decision memory** (`.primer/decisions/`): **Primer systematizes it —
+   decided 2026-07-24** (pending team ratification with the rest of this
+   PRD). The reasoning: a partial channel already exists in disciplined
+   repos — direction docs like `CLAUDE.md` and a maintained roadmap are
+   decisions-in-git, and authoring agents demonstrably use them (this
+   repo's own docs produced PR #16's context block). But that channel is
+   idiosyncratic — it depends on a team's documentation culture, and a
+   product cannot ship "keep excellent docs" as its mechanism. Most repos
+   have no such docs; for them the corpus channel does not exist unless
+   Primer creates it. Structured, uniform, per-decision records are the
+   productized form of what documentation-disciplined teams do by hand.
+   The safeguards stand as ratification conditions: the bot **proposes**
+   the graduation PR, a human merges it — never silent commits, so every
+   record is human-ratified and the rot objection is answered by the same
+   review process the records describe. The dogfood experiment (authoring
+   with vs. without the corpus in context) remains worth running — now to
+   *tune* the record format, not to decide whether to build.
+3. **Per-PR context**: never git (settled in §4.5). Note this concedes
+   that PR N+1's authoring agent cannot see PR N's context block — which
+   makes decision memory (item 2) the only channel by which anything
+   durable reaches the authoring moment, and part of why it is a build,
+   not an option.
 
-**Decide when two things exist:** the hosted API (which makes the
-database-only alternative real) and one dogfood experiment of authoring
-with versus without a decisions file in context. Evidence, not aesthetics.
+**Complementary non-git channel, worth designing alongside:** a skill *can*
+fetch — the `/pr` skill (or a session-start hook) could pull the decision
+corpus from Primer's API, reaching authoring without touching git. Weaker
+than a file (requires the skill to run, auth, connectivity) but real; the
+repo file remains the passive default that works everywhere, the API fetch
+the enrichment for connected sessions.
 
 Status: §4.6 as a whole is proposal only — needs design (graduation format,
 dedup, who approves the graduation commit) and team ratification alongside
