@@ -27,7 +27,6 @@ import {
 import {
   activeContextFromMessage,
   getPageContext,
-  isCommentDraftResult,
   isPrimerExtensionMessage,
   reconcilePageContext,
   type GitHubPageContext,
@@ -87,14 +86,6 @@ const severityLabel: Record<Severity, string> = {
   standard: "Standard review",
   noise: "Low signal",
 };
-
-const draftFailureCopy = {
-  "anchor-not-found": "That diff line is no longer rendered. Scroll it into view and try again.",
-  "composer-not-found": "I found the line, but GitHub’s inline composer did not open.",
-  "range-not-supported": "Range drafting needs one more live GitHub check. Select a single line for now.",
-  "stale-anchor": "The pull request head changed. Refresh the anchor before drafting.",
-  "invalid-request": "The draft was empty or invalid.",
-} as const;
 
 async function navigateGitHubDiff(
   path: string,
@@ -879,38 +870,38 @@ function ReviewConversation({ context, plan, session, client, onSessionChange }:
 
     const reviewReason = selected?.file.path === anchor.path ? selected.step.reason : undefined;
     const body = createFallbackCommentDraft(command.instruction, reviewReason);
-    setDraftFeedback({ tone: "working", message: "Opening GitHub’s native composer…" });
+    setDraftFeedback({ tone: "working", message: "Creating a pending review comment on GitHub…" });
 
     if (new URLSearchParams(window.location.search).has("preview")) {
       setDraftFeedback({
         tone: "success",
-        message: "Preview: draft prepared. In the extension, GitHub opens it for your review.",
+        message: "Preview: draft prepared. In the extension, it becomes a pending GitHub review comment.",
       });
       return;
     }
 
+    // Publish through the harness API with the signed-in user's GitHub token
+    // instead of driving GitHub's DOM, which breaks on every UI redesign.
     try {
-      const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
-      if (tab?.id === undefined) throw new Error("No active tab");
-      const result: unknown = await browser.tabs.sendMessage(tab.id, {
-        type: "primer:draft-comment",
-        anchor,
+      const draft = await client.createDraft(session.id, {
         body,
+        path: anchor.path,
+        line: anchor.line,
+        side: anchor.side,
       });
-      if (!isCommentDraftResult(result)) throw new Error("Invalid drafting response");
-      if (!result.ok) {
-        setDraftFeedback({ tone: "error", message: draftFailureCopy[result.error] });
-        return;
-      }
+      await client.publishDraft(session.id, draft.id);
       setComposerValue("");
       setDraftFeedback({
         tone: "success",
-        message: "Draft ready in GitHub. Edit, cancel, or submit it there.",
+        message: "Pending review comment created. Refresh the PR to see it; it stays private until you submit the review on GitHub.",
       });
-    } catch {
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "";
       setDraftFeedback({
         tone: "error",
-        message: "Primer could not reach the active GitHub diff. Return to the PR and try again.",
+        message: /422|pending review/i.test(message)
+          ? "GitHub already has a pending review for you on this PR. Submit or discard it on GitHub, then try again."
+          : `Could not create the review comment.${message ? ` ${message}` : ""}`,
       });
     }
   };
