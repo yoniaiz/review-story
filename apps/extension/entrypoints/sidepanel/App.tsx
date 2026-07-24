@@ -134,6 +134,27 @@ function getInitialContext(): GitHubPageContext {
   return getPageContext("");
 }
 
+async function navigateGitHubToFile(path: string): Promise<void> {
+  if (new URLSearchParams(window.location.search).has("preview")) return;
+  const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+  if (tab?.id === undefined) return;
+
+  const scrolled = await browser.tabs.sendMessage(tab.id, {
+    type: "primer:navigate-file",
+    path,
+  }).then((result) => result === true).catch(() => false);
+  if (scrolled || !tab.url) return;
+
+  // GitHub's stable file anchor is `diff-${sha256(path)}`. Updating the active
+  // tab fragment gives navigation a reliable fallback when the content script
+  // was not injected into an already-open PR tab.
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(path));
+  const hash = [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  const destination = new URL(tab.url);
+  destination.hash = `diff-${hash}`;
+  await browser.tabs.update(tab.id, { url: destination.href });
+}
+
 function IconButton({ label, children, onClick, pressed }: { label: string; children: ReactNode; onClick?: () => void; pressed?: boolean }) {
   return (
     <Tooltip.Root>
@@ -469,6 +490,65 @@ function ContextLauncher({ context, auth, onExpired }: {
   );
 }
 
+function ReviewOverview({ context, session, plan, route, onStart }: {
+  context: GitHubPageContext;
+  session: HarnessSession & { artifact: NonNullable<HarnessSession["artifact"]> };
+  plan: ReviewPlan;
+  route: ReturnType<typeof getExtensionReviewRoute>;
+  onStart: (routeIndex: number) => void;
+}) {
+  const deepReadCount = session.artifact.chapters.filter(({ attention }) =>
+    attention.level === "DEEP_READ").length;
+
+  return (
+    <div className="overview-scroll">
+      <section className="review-overview">
+        <div className="overview-hero">
+          <p className="utility-label">{context.owner}/{context.repository} · #{context.pullNumber}</p>
+          <div className="overview-signal"><Sparkles size={16} /></div>
+          <h1>I’m ready to guide this review.</h1>
+          <p className="overview-brief">{session.artifact.exec_summary.text}</p>
+          <div className="overview-stats" aria-label="Pull request analysis summary">
+            <span><strong>{plan.stats.totalFiles}</strong> changed files</span>
+            <span><strong>{plan.stats.chapters}</strong> review chapters</span>
+            <span><strong>{deepReadCount}</strong> deep-read areas</span>
+          </div>
+          <button className="primary-action overview-start" type="button" disabled={!route.length} onClick={() => onStart(0)}>
+            Begin guided review <ArrowRight size={15} />
+          </button>
+        </div>
+
+        <div className="overview-section-heading">
+          <span>Review path</span>
+          <small>{route.length} evidence-backed steps</small>
+        </div>
+        <div className="overview-chapters">
+          {plan.chapters.map((chapter, index) => {
+            const artifactChapter = session.artifact.chapters.find(({ id }) => id === chapter.id);
+            const firstRouteIndex = route.findIndex((item) => item.chapter.id === chapter.id);
+            return (
+              <button className="overview-chapter" type="button" key={chapter.id} disabled={firstRouteIndex < 0} onClick={() => onStart(firstRouteIndex)}>
+                <span className="overview-chapter-number">{String(index + 1).padStart(2, "0")}</span>
+                <span className="overview-chapter-copy">
+                  <span className="overview-chapter-meta">
+                    {chapter.fileIds.length} files · {artifactChapter?.attention.level.replace("_", " ").toLowerCase() ?? "standard"}
+                  </span>
+                  <strong>{chapter.title}</strong>
+                  <p>{chapter.summary}</p>
+                </span>
+                <ArrowRight size={15} />
+              </button>
+            );
+          })}
+        </div>
+        {plan.stats.noiseFiles ? (
+          <p className="overview-appendix">Primer set aside {plan.stats.noiseFiles} generated or low-signal files to keep the guided path focused.</p>
+        ) : null}
+      </section>
+    </div>
+  );
+}
+
 function LiveReview({ context, panelView }: {
   context: GitHubPageContext;
   panelView: "conversation" | "architecture";
@@ -483,6 +563,8 @@ function LiveReview({ context, panelView }: {
   const [error, setError] = useState<string>();
   const [resolvedHeadSha, setResolvedHeadSha] = useState<string>();
   const [headResolutionError, setHeadResolutionError] = useState<string>();
+  const [reviewScreen, setReviewScreen] = useState<"overview" | "steps">("overview");
+  const [entryRouteIndex, setEntryRouteIndex] = useState(0);
   const headSha = context.headSha
     ?? context.activeAnchor?.headSha
     ?? resolvedHeadSha;
@@ -513,6 +595,8 @@ function LiveReview({ context, panelView }: {
     setPhase("idle");
     setGeneratedChapters([]);
     setError(undefined);
+    setReviewScreen("overview");
+    setEntryRouteIndex(0);
   }, [reviewIdentity]);
 
   useEffect(() => () => sourceRef.current?.close(), []);
@@ -529,6 +613,7 @@ function LiveReview({ context, panelView }: {
       try {
         const parsed = StoryStreamEventSchema.parse(JSON.parse(raw.data));
         if (parsed.type === "story.skeleton") {
+          setError(undefined);
           setSession((current) => current ? { ...current, status: "GENERATING", skeleton: parsed.data } : current);
         }
         if (parsed.type === "story.chapter") {
@@ -564,9 +649,10 @@ function LiveReview({ context, panelView }: {
     }
     source.onerror = () => {
       if (settled || activeReviewIdentityRef.current !== requestedIdentity) return;
-      source.close();
-      setError(`Could not reach the review harness at ${harnessConfig.apiBaseUrl}.`);
-      setPhase("idle");
+      // EventSource reconnects automatically. A transient SSE close is expected
+      // during local dev reloads and must not turn a healthy stored generation
+      // into a terminal connection error.
+      setPhase("generating");
     };
   }, [client]);
 
@@ -628,6 +714,21 @@ function LiveReview({ context, panelView }: {
     total: generationChapters.length,
   };
 
+  const enterGuidedReview = async (routeIndex: number) => {
+    const next = route[routeIndex];
+    if (!next || !session) return;
+    setEntryRouteIndex(routeIndex);
+    if (next.chapter.id !== session.currentChapterId) {
+      try {
+        setSession(await client.selectChapter(session.id, next.chapter.id));
+      } catch {
+        // The local route remains usable if progress persistence is unavailable.
+      }
+    }
+    setReviewScreen("steps");
+    void navigateGitHubToFile(next.file.path);
+  };
+
   if (session?.artifact && plan) {
     if (panelView === "architecture") {
       return (
@@ -656,7 +757,28 @@ function LiveReview({ context, panelView }: {
         </Suspense>
       );
     }
-    return <ReviewConversation context={context} plan={plan} session={session} client={client} onSessionChange={setSession} />;
+    if (reviewScreen === "overview") {
+      return (
+        <ReviewOverview
+          context={context}
+          session={session as HarnessSession & { artifact: NonNullable<HarnessSession["artifact"]> }}
+          plan={plan}
+          route={route}
+          onStart={(index) => void enterGuidedReview(index)}
+        />
+      );
+    }
+    return (
+      <ReviewConversation
+        context={context}
+        plan={plan}
+        session={session}
+        client={client}
+        initialSelectedIndex={entryRouteIndex}
+        onBackToOverview={() => setReviewScreen("overview")}
+        onSessionChange={setSession}
+      />
+    );
   }
 
   const busy = phase !== "idle";
@@ -693,14 +815,23 @@ function LiveReview({ context, panelView }: {
   );
 }
 
-function ReviewConversation({ context, plan, session, client, onSessionChange }: {
+function ReviewConversation({
+  context,
+  plan,
+  session,
+  client,
+  initialSelectedIndex,
+  onBackToOverview,
+  onSessionChange,
+}: {
   context: GitHubPageContext;
   plan: ReviewPlan;
   session: HarnessSession;
   client: HarnessClient;
+  initialSelectedIndex: number;
+  onBackToOverview: () => void;
   onSessionChange: (session: HarnessSession) => void;
 }) {
-  const repo = `${context.owner}/${context.repository}`;
   const activeFileName = context.activeFile?.split("/").at(-1);
   const anchor = context.activeAnchor;
   const anchorLabel = anchor
@@ -710,6 +841,7 @@ function ReviewConversation({ context, plan, session, client, onSessionChange }:
     : undefined;
   const route = useMemo(() => getExtensionReviewRoute(plan), [plan]);
   const [selectedIndex, setSelectedIndex] = useState(() => {
+    if (route[initialSelectedIndex]) return initialSelectedIndex;
     const currentChapterIndex = route.findIndex(({ chapter }) => chapter.id === session.currentChapterId);
     return currentChapterIndex >= 0 ? currentChapterIndex : -1;
   });
@@ -738,6 +870,7 @@ function ReviewConversation({ context, plan, session, client, onSessionChange }:
     return () => { cancelled = true; };
   }, [client, context.owner, context.repository]);
   const selected = route[selectedIndex];
+  const selectedFilePath = selected?.file.path;
   const selectedStatus = selected ? statuses[selected.step.fileId] ?? selected.step.status : "pending";
   const severity = selected?.file.severity ?? "standard";
   const chapterNumber = selected ? plan.chapters.indexOf(selected.chapter) + 1 : 0;
@@ -966,7 +1099,7 @@ function ReviewConversation({ context, plan, session, client, onSessionChange }:
   return (
     <>
       <div
-        className="conversation"
+        className="conversation step-conversation"
         ref={conversationRef}
         role="log"
         aria-label="Review conversation"
@@ -984,7 +1117,7 @@ function ReviewConversation({ context, plan, session, client, onSessionChange }:
               <p className="agent-name"><Sparkles size={13} /> Primer</p>
               <h1>I’m ready to guide this review.</h1>
               <p>
-                I found <strong>{repo}#{context.pullNumber}</strong>.
+                I found <strong>{context.owner}/{context.repository}#{context.pullNumber}</strong>.
                 {plan
                   ? ` I loaded ${route.length} evidence-backed steps across ${plan.chapters.length} chapters and will follow the diff as you scroll.`
                   : " I’ll follow the diff as you scroll and keep the review tied to the visible code."}
@@ -1045,7 +1178,7 @@ function ReviewConversation({ context, plan, session, client, onSessionChange }:
                 onClick={() => {
                   setComposerValue("");
                   setDraftFeedback(undefined);
-                  setSelectedIndex(-1);
+                  onBackToOverview();
                 }}
               >
                 <ArrowLeft size={13} /> Overview
@@ -1053,16 +1186,29 @@ function ReviewConversation({ context, plan, session, client, onSessionChange }:
               <span>Chapter {chapterNumber} · Step {selectedIndex + 1}/{route.length}</span>
               <span className={`step-status status-${selectedStatus}`}><i /> {selectedStatus}</span>
             </div>
-            <strong>{selected.file.path.split("/").at(-1)}</strong>
-            <p>{selected.step.reason}</p>
-            <div className="evidence-list">
-              {selected.step.evidence.slice(0, 3).map((evidence, index) => (
-                <div className="evidence-row" key={`${evidence.kind}-${index}`}>
-                  <span>{evidence.kind.replace("-", " ")}</span>
-                  <p>{evidence.description}</p>
-                </div>
-              ))}
+            <h1>{selected.file.path.split("/").at(-1)}</h1>
+            <code className="focus-file-path">{selected.file.path}</code>
+            <p className="focus-step-summary">{selected.step.reason}</p>
+            <div className={`focus-live-context ${context.activeFile === selected.file.path ? "is-aligned" : ""}`}>
+              <FileCode2 size={13} />
+              <span>{context.activeFile === selected.file.path
+                ? "GitHub is aligned to this file"
+                : context.activeFile
+                  ? `GitHub is currently on ${activeFileName}`
+                  : "Waiting for the GitHub diff"}</span>
+              {anchor?.path === selected.file.path ? <code>{anchorLabel}</code> : null}
             </div>
+            {selected.step.evidence.length ? (
+              <div className="focus-evidence">
+                <span className="focus-section-label">What to verify</span>
+                {selected.step.evidence.slice(0, 2).map((evidence, index) => (
+                  <div className="focus-evidence-row" key={`${evidence.kind}-${index}`}>
+                    <i />
+                    <p>{evidence.description}</p>
+                  </div>
+                ))}
+              </div>
+            ) : null}
           </section>
         ) : null}
 
