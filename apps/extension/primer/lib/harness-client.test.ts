@@ -22,4 +22,27 @@ describe("HarnessClient", () => {
     expect(init?.body).toBeUndefined();
     expect(init?.headers).not.toHaveProperty("Content-Type");
   });
+
+  it("sends the exact step scope with a chat message", async () => {
+    const request = vi.fn(async (_input: URL | RequestInfo, _init?: RequestInit) =>
+      new Response(JSON.stringify({ user: {}, assistant: {} }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }));
+    vi.stubGlobal("fetch", request);
+    const client = new HarnessClient({ apiBaseUrl: "http://127.0.0.1:8787" });
+
+    await client.sendChatMessage("session", {
+      message: "What should I verify?",
+      chapterId: "chapter-shop",
+      stepId: "src/shop/checkout.ts",
+    });
+
+    const init = request.mock.calls[0]?.[1];
+    expect(JSON.parse(String(init?.body))).toEqual({
+      message: "What should I verify?",
+      chapterId: "chapter-shop",
+      stepId: "src/shop/checkout.ts",
+    });
+  });
 });

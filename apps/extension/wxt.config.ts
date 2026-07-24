@@ -53,7 +53,7 @@ export default defineConfig({
     key: "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAr6hxcu5dR89LfsGWqxyAA6aVNAQM9BCJ8IMtNIpPLFjSom5dXx65Bpt7qiYQfZ5+WoOLRlSOWbmlUrMjD3nb1C+2udb+Ars9QgILLJuNFBFX0Us0WyoxrGVIRt5ODFjgeYGHuZ2KQDspGkwwfNSJ+EqowYQPbOPaSVnVEcO3v9+rsCXpa9EZUVj2OnfwPq7moCOtNAQAmqMGPg23g00P6UJqxD1oZf4PkonJBjRt27YE2C0LWWH53sk03DITW3mnMNeDbQ//O38xJetrsB7knljvrr4cIkRg1ZmLlLnErianoYlFURbHu+wSUIwsFMCM3TpQF7iQCOnpzr56MQKCbwIDAQAB",
     description: "An evidence-backed AI review companion for GitHub pull requests.",
     minimum_chrome_version: "116",
-    permissions: ["tabs", "storage", "webNavigation", "identity"],
+    permissions: ["tabs", "storage", "webNavigation", "identity", "scripting"],
     host_permissions: [
       "https://github.com/*",
       ...apiOrigins.map((origin) => `${origin}/*`),

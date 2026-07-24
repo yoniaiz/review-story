@@ -471,6 +471,7 @@ function ContextLauncher({ context, auth, onExpired }: {
   );
 }
 
+
 function LiveReview({ context, panelView }: {
   context: GitHubPageContext;
   panelView: "conversation" | "architecture";
@@ -531,6 +532,7 @@ function LiveReview({ context, panelView }: {
       try {
         const parsed = StoryStreamEventSchema.parse(JSON.parse(raw.data));
         if (parsed.type === "story.skeleton") {
+          setError(undefined);
           setSession((current) => current ? { ...current, status: "GENERATING", skeleton: parsed.data } : current);
         }
         if (parsed.type === "story.chapter") {
@@ -566,9 +568,10 @@ function LiveReview({ context, panelView }: {
     }
     source.onerror = () => {
       if (settled || activeReviewIdentityRef.current !== requestedIdentity) return;
-      source.close();
-      setError(`Could not reach the review harness at ${harnessConfig.apiBaseUrl}.`);
-      setPhase("idle");
+      // EventSource reconnects automatically. A transient SSE close is expected
+      // during local dev reloads and must not turn a healthy stored generation
+      // into a terminal connection error.
+      setPhase("generating");
     };
   }, [client]);
 
@@ -736,7 +739,6 @@ function ReviewConversation({ context, plan, session, client, onSessionChange, a
   onSessionChange: (session: HarnessSession) => void;
   authorContext?: PrimerContextParseResult | undefined;
 }) {
-  const repo = `${context.owner}/${context.repository}`;
   const activeFileName = context.activeFile?.split("/").at(-1);
   const anchor = context.activeAnchor;
   const anchorLabel = anchor
@@ -775,6 +777,7 @@ function ReviewConversation({ context, plan, session, client, onSessionChange, a
     return () => { cancelled = true; };
   }, [client, context.owner, context.repository]);
   const selected = route[selectedIndex];
+  const selectedFilePath = selected?.file.path;
   const selectedStatus = selected ? statuses[selected.step.fileId] ?? selected.step.status : "pending";
   const severity = selected?.file.severity ?? "standard";
   const chapterNumber = selected ? plan.chapters.indexOf(selected.chapter) + 1 : 0;
@@ -1003,7 +1006,7 @@ function ReviewConversation({ context, plan, session, client, onSessionChange, a
   return (
     <>
       <div
-        className="conversation"
+        className="conversation step-conversation"
         ref={conversationRef}
         role="log"
         aria-label="Review conversation"
@@ -1186,6 +1189,12 @@ function ReviewConversation({ context, plan, session, client, onSessionChange, a
                 </div>
               ))}
             </div>
+            <p>This overview applies to the whole pull request. Step conversations open on their own page, scoped to a single review step.</p>
+            {route.length ? (
+              <button className="begin-review" type="button" onClick={() => void navigateTo(0)}>
+                Begin chapter 1 <ArrowRight size={14} />
+              </button>
+            ) : null}
           </section>
         ) : null}
 
