@@ -1,5 +1,10 @@
 import type { Evidence } from "@review-story/contracts";
-import type { ReviewSession } from "./review-session.js";
+import { chatTurnsForStep, type ReviewSession } from "./review-session.js";
+
+export interface ChatStepScope {
+  chapterId: string;
+  stepId: string;
+}
 
 export interface ChatReply {
   text: string;
@@ -7,17 +12,8 @@ export interface ChatReply {
   responseId?: string;
 }
 
-export interface ActiveReviewContext {
-  chapterId: string;
-  filePath: string;
-}
-
 export interface ChatEngine {
-  reply(input: {
-    session: ReviewSession;
-    message: string;
-    activeContext?: ActiveReviewContext;
-  }): Promise<ChatReply>;
+  reply(input: { session: ReviewSession; message: string; scope: ChatStepScope }): Promise<ChatReply>;
 }
 
 /**
@@ -27,18 +23,16 @@ export interface ChatEngine {
  */
 export class OpenAiResponsesChatEngine implements ChatEngine {
   readonly #apiKey: string | undefined;
+  readonly #model: string;
 
-  constructor(apiKey?: string) {
+  constructor(apiKey?: string, model?: string) {
     this.#apiKey = apiKey ?? process.env.OPENAI_API_KEY;
+    this.#model = model ?? process.env.OPENAI_CHAT_MODEL ?? "gpt-5.6-terra";
   }
 
-  async reply({ session, message, activeContext }: {
-    session: ReviewSession;
-    message: string;
-    activeContext?: ActiveReviewContext;
-  }): Promise<ChatReply> {
+  async reply({ session, message, scope }: { session: ReviewSession; message: string; scope: ChatStepScope }): Promise<ChatReply> {
     if (process.env.ANALYZER_MODE === "deterministic") {
-      return deterministicEvidenceReply(session, message, activeContext);
+      return deterministicEvidenceReply(session, message, scope);
     }
     if (!this.#apiKey) {
       throw new Error("OPENAI_API_KEY is required to use chat");
@@ -50,42 +44,20 @@ export class OpenAiResponsesChatEngine implements ChatEngine {
       };
     }
 
-    const activeChapterId = activeContext?.chapterId ?? session.currentChapterId;
-    const activeChapter = session.artifact.chapters.find(({ id }) => id === activeChapterId);
-    const activeFile = activeContext && activeChapter
-      ? activeChapter.files.find(({ path }) => path === activeContext.filePath)
-      : undefined;
+    const scopedTurns = chatTurnsForStep(session, scope);
+    const currentMessageIndex = scopedTurns.reduce(
+      (found, turn, index) => turn.role === "user" && turn.content === message ? index : found,
+      -1,
+    );
+    const priorHistory = currentMessageIndex >= 0
+      ? scopedTurns.slice(0, currentMessageIndex)
+      : scopedTurns;
     const context = {
-      pullRequest: {
-        owner: session.owner,
-        repo: session.repo,
-        number: session.pullNumber,
-        headSha: session.headSha,
-      },
-      overview: {
-        summary: session.artifact.exec_summary,
-        chapters: session.artifact.chapters.map((chapter) => ({
-          id: chapter.id,
-          title: chapter.title,
-          summary: chapter.summary,
-          attention: chapter.attention,
-          fileCount: chapter.files.length,
-        })),
-        omittedFileCount: session.artifact.appendix.files.length,
-      },
-      activePage: activeChapter ? {
-        chapter: {
-          id: activeChapter.id,
-          title: activeChapter.title,
-          summary: activeChapter.summary,
-          scrutinize: activeChapter.scrutinize,
-          relatedTests: activeChapter.related_tests,
-          attention: activeChapter.attention,
-        },
-        file: activeFile ?? null,
-      } : null,
+      currentChapterId: scope.chapterId,
+      currentStepId: scope.stepId,
       completedChapterIds: session.completedChapters.map(({ chapterId }) => chapterId),
-      history: session.chatTurns.slice(-12).map(({ role, content }) => ({ role, content })),
+      artifact: session.artifact,
+      history: priorHistory.slice(-12).map(({ role, content }) => ({ role, content })),
     };
     const response = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
@@ -95,7 +67,7 @@ export class OpenAiResponsesChatEngine implements ChatEngine {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "gpt-5.6-terra",
+        model: this.#model,
         store: false,
         reasoning: { effort: "medium", context: "all_turns" },
         input: [
@@ -107,16 +79,14 @@ export class OpenAiResponsesChatEngine implements ChatEngine {
           { role: "user", content: message },
         ],
       }),
-    }).catch(() => undefined);
-    if (!response?.ok) {
-      return deterministicEvidenceReply(session, message, activeContext);
+    });
+    if (!response.ok) {
+      const detail = await response.text().catch(() => "");
+      throw new Error(`Chat model request failed (${response.status})${detail ? `: ${detail.slice(0, 200)}` : ""}`);
     }
     const payload = await response.json() as { id?: string; output_text?: string };
     const text = payload.output_text?.trim() || "I could not produce a review response.";
     const citations = extractAndValidateCitations(text, session);
-    if (!citations.length && /[.!?]/.test(text)) {
-      return deterministicEvidenceReply(session, message, activeContext);
-    }
     return {
       text,
       citations,
@@ -128,7 +98,7 @@ export class OpenAiResponsesChatEngine implements ChatEngine {
 function deterministicEvidenceReply(
   session: ReviewSession,
   message: string,
-  activeContext?: ActiveReviewContext,
+  scope: ChatStepScope,
 ): ChatReply {
   const artifact = session.artifact;
   if (!artifact) {
@@ -138,15 +108,14 @@ function deterministicEvidenceReply(
     };
   }
 
-  if (/\b(intent|overall|whole pr|pr summary|what.*pr)\b/i.test(message)) {
+  if (/\b(intent|summary|what.*pr|what.*change)\b/i.test(message)) {
     return {
       text: `${artifact.exec_summary.text} ${formatCitations(artifact.exec_summary.evidence)}`,
       citations: artifact.exec_summary.evidence,
     };
   }
 
-  const current = artifact.chapters.find(({ id }) =>
-    id === (activeContext?.chapterId ?? session.currentChapterId));
+  const current = artifact.chapters.find(({ id }) => id === scope.chapterId);
   const highestRisk = [...artifact.chapters].sort((left, right) =>
     attentionRank(right.attention.level) - attentionRank(left.attention.level))[0];
   const chapter = /\b(risk|danger|scrutinize|concern)\b/i.test(message)
@@ -158,11 +127,7 @@ function deterministicEvidenceReply(
       citations: artifact.exec_summary.evidence,
     };
   }
-  const fileClaims = activeContext
-    ? [chapter.summary, ...chapter.scrutinize].filter((claim) =>
-      claim.evidence.some(({ path }) => path === activeContext.filePath))
-    : [];
-  const claim = fileClaims[0] ?? chapter.scrutinize[0] ?? chapter.summary;
+  const claim = chapter.scrutinize[0] ?? chapter.summary;
   return {
     text: `${claim.text} ${formatCitations(claim.evidence)}`,
     citations: claim.evidence,

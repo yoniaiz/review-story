@@ -40,3 +40,12 @@ export function findRouteIndexByPath(route: ExtensionReviewRouteStep[], path?: s
   return route.findIndex((item) => item.file.path === path);
 }
 
+export function findChapterEntryRouteIndex(
+  route: ExtensionReviewRouteStep[],
+  chapter: Pick<ReviewChapter, "id" | "entryPoint">,
+): number {
+  const entryPointIndex = route.findIndex((item) =>
+    item.chapter.id === chapter.id && item.file.path === chapter.entryPoint);
+  if (entryPointIndex >= 0) return entryPointIndex;
+  return route.findIndex((item) => item.chapter.id === chapter.id);
+}

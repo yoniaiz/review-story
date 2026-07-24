@@ -35,12 +35,17 @@ export const StoryMetaSchema = z.object({
     schema: z.literal(1),
   }),
   status: z.enum(["GENERATING", "READY", "FAILED"]),
+  // Degradations that occurred during analysis (e.g. repository workspace
+  // unavailable, so notes are diff-only). Surfaced to reviewers in the UI.
+  warnings: z.array(z.string().min(1)).optional(),
 }).strict();
 
 export const StoryFileSchema = z.object({
   path: z.string().min(1),
   note: z.string().min(1),
   anchor_hunks: z.array(LineRangeSchema),
+  attention_floor: AttentionLevelSchema.optional(),
+  imports_changed_files: z.array(z.string().min(1)).optional(),
 }).strict();
 
 export const RelatedTestsSchema = z.object({
@@ -352,6 +357,8 @@ export type StoryStreamEvent = z.infer<typeof StoryStreamEventSchema>;
 export interface AnalyzerContext {
   signal?: AbortSignal;
   onResult?: (result: AnalyzeResult) => void | Promise<void>;
+  /** Acts as this GitHub user for repo/PR reads; falls back to the server token. */
+  githubToken?: string;
 }
 
 export interface Analyzer {

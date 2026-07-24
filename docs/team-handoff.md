@@ -26,7 +26,7 @@ The harness is implemented under `apps/api`.
 
 ## Harness endpoints
 
-All routes are served by the Fastify API. When `HARNESS_ACCESS_TOKEN` is configured, send it as `Authorization: Bearer <token>`; the future extension must add `access_token=<token>` to SSE URLs because `EventSource` cannot set headers.
+All routes are served by the Fastify API. Authenticated deployments use GitHub sign-in: the extension sends its per-user harness session token as `Authorization: Bearer <token>`, and as `access_token=<token>` on SSE URLs because `EventSource` cannot set headers.
 
 | Route | Purpose |
 |---|---|
@@ -73,7 +73,6 @@ Copy `.env.example` to `.env` and configure only what you use:
 ```dotenv
 OPENAI_API_KEY=                 # required for chat
 GITHUB_PAT=                     # required to publish pending comments
-HARNESS_ACCESS_TOKEN=           # optional local/hosted harness guard
 SUPABASE_URL=https://<ref>.supabase.co
 SUPABASE_SECRET_KEY=sb_secret_... # server-only; never browser code
 ```

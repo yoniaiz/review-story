@@ -3,6 +3,7 @@ import { defineBackground } from "wxt/utils/define-background";
 import {
   getPageContext,
   isPrimerExtensionMessage,
+  reconcilePageContext,
   type GitHubPageContext,
   type PrimerExtensionMessage,
 } from "../primer/lib/extension-context";
@@ -37,7 +38,7 @@ async function readTabContext(tabId: number): Promise<GitHubPageContext | undefi
 async function requestTabContext(tabId: number, fallbackUrl = ""): Promise<GitHubPageContext> {
   try {
     const context = await readTabContext(tabId);
-    if (context) return context;
+    if (context) return reconcilePageContext(fallbackUrl, context);
   } catch {
     // Reloading an unpacked extension invalidates its scripts in tabs that were
     // already open. Re-inject once so context tracking and file navigation work
@@ -45,13 +46,13 @@ async function requestTabContext(tabId: number, fallbackUrl = ""): Promise<GitHu
     if (await ensureContentScript(tabId, fallbackUrl)) {
       try {
         const context = await readTabContext(tabId);
-        if (context) return context;
+        if (context) return reconcilePageContext(fallbackUrl, context);
       } catch {
         // Fall through to the last observed or URL-derived context.
       }
     }
   }
-  return contextByTab.get(tabId) ?? getPageContext(fallbackUrl);
+  return reconcilePageContext(fallbackUrl, contextByTab.get(tabId));
 }
 
 async function broadcastActiveContext(tabId: number, url = ""): Promise<void> {
@@ -91,9 +92,19 @@ export default defineBackground(() => {
   });
 
   browser.tabs.onUpdated.addListener((tabId, change, tab) => {
-    if (change.url || change.status === "complete") {
+    // GitHub tabs in the background continue to mutate and navigate. Only the
+    // active tab may drive the side panel; otherwise an unrelated repository
+    // can replace the PR context that the reviewer is actually looking at.
+    if (tab.active && (change.url || change.status === "complete")) {
       void broadcastActiveContext(tabId, change.url ?? tab.url);
     }
+  });
+
+  browser.webNavigation.onHistoryStateUpdated.addListener(({ tabId, frameId, url }) => {
+    if (frameId !== 0) return;
+    void browser.tabs.get(tabId).then((tab) => {
+      if (tab.active) void broadcastActiveContext(tabId, url);
+    }).catch(() => undefined);
   });
 
   browser.tabs.onRemoved.addListener((tabId) => {

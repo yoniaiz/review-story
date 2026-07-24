@@ -1,6 +1,6 @@
 import { browser } from "wxt/browser";
 import { defineContentScript } from "wxt/utils/define-content-script";
-import { getPageContext, isPrimerExtensionMessage } from "../primer/lib/extension-context";
+import { getPageContext, isPrimerExtensionMessage, isSameGitCommit } from "../primer/lib/extension-context";
 import type { CommentDraftResult, DiffAnchor, DiffSide } from "../primer/lib/extension-context";
 import {
   createDiffAnchor,
@@ -8,9 +8,105 @@ import {
   parseDiffCellId,
   type DiffPoint,
 } from "../primer/lib/github-diff-anchor";
+import {
+  createGitHubDiffFragment,
+  createPullFilesUrl,
+} from "../primer/lib/github-navigation";
+import { normalizeGitHubFilePath } from "../primer/lib/github-file-path";
 
-const FILE_SELECTOR = "[data-file-path], .file[data-path], [data-testid='diff-file'], copilot-diff-entry";
+const FILE_SELECTOR = [
+  "[data-file-path]",
+  ".file[data-path]",
+  "[data-testid='diff-file']",
+  "copilot-diff-entry",
+  // GitHub's React diff container uses the file's `diff-<sha256>` fragment as
+  // its id; line ids append an uppercase L/R suffix and are excluded here.
+  "[id^='diff-']:not([id*='L']):not([id*='R'])",
+].join(", ");
 const LINE_SELECTOR = "[data-line-number], [data-line], td.blob-num, [id*='diff-'][id*='L'], [id*='diff-'][id*='R']";
+const RESIZE_SETTLE_MS = 80;
+const DIFF_SCROLL_STICKY_OFFSET = 88;
+const DIFF_SCROLL_MIN_MS = 450;
+const DIFF_SCROLL_MAX_MS = 1_100;
+const DIFF_SCROLL_MAX_FRAME_PX = 90;
+let activeDiffScrollFrame: number | undefined;
+let activeDiffScrollTarget: { element: Element; block: DiffScrollBlock } | undefined;
+
+type DiffScrollBlock = "start" | "center";
+
+function diffScrollTop(target: Element, block: DiffScrollBlock): number {
+  const rect = target.getBoundingClientRect();
+  const absoluteTop = window.scrollY + rect.top;
+  const desiredTop = block === "center"
+    ? absoluteTop - (window.innerHeight - rect.height) / 2
+    : absoluteTop - DIFF_SCROLL_STICKY_OFFSET;
+  const maxScrollTop = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+  return Math.min(maxScrollTop, Math.max(0, desiredTop));
+}
+
+function cancelDiffScroll(): void {
+  if (activeDiffScrollFrame !== undefined) {
+    window.cancelAnimationFrame(activeDiffScrollFrame);
+    activeDiffScrollFrame = undefined;
+  }
+  activeDiffScrollTarget = undefined;
+}
+
+function animateDiffScroll(target: Element, block: DiffScrollBlock): void {
+  // Re-requests for the in-flight destination arrive constantly while
+  // GitHub hydrates virtualized rows; restarting the glide reads as a jump.
+  if (
+    activeDiffScrollFrame !== undefined
+    && activeDiffScrollTarget?.element === target
+    && activeDiffScrollTarget.block === block
+  ) {
+    return;
+  }
+  cancelDiffScroll();
+
+  const startTop = window.scrollY;
+  const distance = diffScrollTop(target, block) - startTop;
+  if (Math.abs(distance) < 2 || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    window.scrollTo({ top: startTop + distance, behavior: "auto" });
+    return;
+  }
+
+  // One hand-driven glide for every distance: native smooth scroll cannot be
+  // cancelled or retargeted, and hydration shifts the layout mid-scroll, so
+  // the destination is recomputed from the element on every frame.
+  const duration = Math.min(
+    DIFF_SCROLL_MAX_MS,
+    Math.max(DIFF_SCROLL_MIN_MS, DIFF_SCROLL_MIN_MS + Math.abs(distance) * 0.25),
+  );
+  const startedAt = performance.now();
+  activeDiffScrollTarget = { element: target, block };
+  const tick = (now: number) => {
+    if (!target.isConnected) {
+      cancelDiffScroll();
+      return;
+    }
+    const progress = Math.min(1, (now - startedAt) / duration);
+    const eased = progress < 0.5
+      ? 2 * progress ** 2
+      : 1 - ((-2 * progress + 2) ** 2) / 2;
+    const targetTop = diffScrollTop(target, block);
+    // Hydration can move the destination mid-glide; capping how far a single
+    // frame travels absorbs the shift over several frames instead of snapping.
+    const desired = startTop + (targetTop - startTop) * eased;
+    const step = Math.max(
+      -DIFF_SCROLL_MAX_FRAME_PX,
+      Math.min(DIFF_SCROLL_MAX_FRAME_PX, desired - window.scrollY),
+    );
+    window.scrollTo({ top: window.scrollY + step, behavior: "auto" });
+    const settled = progress >= 1 && Math.abs(diffScrollTop(target, block) - window.scrollY) < 2;
+    if (!settled && now - startedAt < duration * 2) {
+      activeDiffScrollFrame = window.requestAnimationFrame(tick);
+    } else {
+      cancelDiffScroll();
+    }
+  };
+  activeDiffScrollFrame = window.requestAnimationFrame(tick);
+}
 
 function visibleHeight(element: Element): number {
   const rect = element.getBoundingClientRect();
@@ -19,30 +115,96 @@ function visibleHeight(element: Element): number {
 
 function readFilePath(element: Element): string | undefined {
   const direct = element.getAttribute("data-file-path") ?? element.getAttribute("data-path");
-  if (direct) return direct;
+  if (direct) return normalizeGitHubFilePath(direct);
 
   const label = element.querySelector<HTMLElement>(
     "[data-file-path], [data-path], .file-info a, a.Link--primary[href*='#diff-']",
   );
-  return label?.getAttribute("data-file-path")
+  const labelled = normalizeGitHubFilePath(label?.getAttribute("data-file-path")
     ?? label?.getAttribute("data-path")
     ?? label?.textContent?.trim()
-    ?? undefined;
+    ?? undefined);
+  if (labelled) return labelled;
+
+  // GitHub's /changes diff UI names file containers only by their
+  // `diff-<sha256(path)>` id; resolve it through the precomputed index.
+  indexDiffAnchorPaths();
+  const anchorId = element.id || element.getAttribute("data-diff-anchor") || "";
+  return diffAnchorPaths.get(anchorId);
+}
+
+// `diff-<sha256(path)>` → path, built from every changed-file path the page
+// discloses (embedded JSON payloads and legacy data attributes). Digests are
+// async, so the map fills a beat after indexing; publishes are frequent
+// enough that the next one resolves.
+const diffAnchorPaths = new Map<string, string>();
+const indexedCandidatePaths = new Set<string>();
+let lastPathIndexAt = 0;
+
+function indexDiffAnchorPaths(): void {
+  const now = Date.now();
+  if (now - lastPathIndexAt < 3_000) return;
+  lastPathIndexAt = now;
+  const candidates = new Set<string>();
+  for (const element of document.querySelectorAll("[data-file-path], .file[data-path]")) {
+    const value = element.getAttribute("data-file-path") ?? element.getAttribute("data-path");
+    if (value) candidates.add(value);
+  }
+  for (const script of document.querySelectorAll("script")) {
+    const text = script.textContent;
+    if (!text || text.length < 32) continue;
+    for (const match of text.matchAll(/"(?:path|filePath)"\s*:\s*"([^"\\]{1,512})"/g)) {
+      candidates.add(match[1]!);
+    }
+  }
+  for (const path of candidates) {
+    if (indexedCandidatePaths.has(path)) continue;
+    indexedCandidatePaths.add(path);
+    void createGitHubDiffFragment(path).then((fragment) => {
+      diffAnchorPaths.set(fragment, path);
+    });
+  }
 }
 
 function findVisibleFile(): string | undefined {
-  const candidates = Array.from(document.querySelectorAll(FILE_SELECTOR));
+  const viewportCenter = window.innerHeight / 2;
+  const candidates = Array.from(document.querySelectorAll(FILE_SELECTOR))
+    .map((element) => {
+      const rect = element.getBoundingClientRect();
+      return {
+        path: readFilePath(element),
+        top: rect.top,
+        bottom: rect.bottom,
+        height: visibleHeight(element),
+        distance: Math.abs((rect.top + rect.bottom) / 2 - viewportCenter),
+      };
+    })
+    .filter((candidate): candidate is typeof candidate & { path: string } => Boolean(candidate.path));
   const visible = candidates
-    .map((element) => ({ element, height: visibleHeight(element) }))
     .filter(({ height }) => height > 0)
-    .sort((left, right) => right.height - left.height)[0]?.element;
-  return visible ? readFilePath(visible) : undefined;
+    .sort((left, right) => left.distance - right.distance)[0];
+  if (visible) return visible.path;
+
+  // GitHub's current diff UI puts data-file-path on a short file-header
+  // button, not on the full diff container. While reviewing the body that
+  // header is usually just above the viewport, so use the nearest preceding
+  // header as the active file instead of dropping back to "Waiting".
+  return candidates
+    .filter(({ top }) => top <= viewportCenter)
+    .sort((left, right) => right.top - left.top)[0]?.path
+    ?? candidates.sort((left, right) => left.distance - right.distance)[0]?.path;
 }
 
 function findFileElement(path?: string): Element | undefined {
   if (!path) return undefined;
   return Array.from(document.querySelectorAll(FILE_SELECTOR))
-    .find((element) => readFilePath(element) === path);
+    .filter((element) => readFilePath(element) === path)
+    .sort((left, right) => fileElementScore(right) - fileElementScore(left))[0];
+}
+
+function fileElementScore(element: Element): number {
+  const rect = element.getBoundingClientRect();
+  return (element.querySelector(LINE_SELECTOR) ? 2 : 0) + (rect.height > 60 ? 1 : 0);
 }
 
 function readHeadSha(): string | undefined {
@@ -62,6 +224,46 @@ function readHeadSha(): string | undefined {
       ?? element?.getAttribute("data-head-ref-oid")
       ?? element?.getAttribute("data-head-sha");
     if (value && /^[a-f0-9]{7,64}$/i.test(value)) return value;
+  }
+  return headShaFromDiffUrls() ?? headShaFromEmbeddedJson();
+}
+
+// GitHub's /changes diff UI only discloses the head SHA inside embedded JSON
+// payloads ("headSha"/"headOid"/"newCommitOid"). Script scanning is costly on
+// large PRs, so cache per pathname.
+let cachedHeadSha: { key: string; value: string } | undefined;
+
+function headShaFromEmbeddedJson(): string | undefined {
+  if (cachedHeadSha?.key === window.location.pathname) return cachedHeadSha.value;
+  for (const script of document.querySelectorAll("script")) {
+    const text = script.textContent;
+    if (!text || text.length < 64) continue;
+    const match = text.match(/"(?:headSha|headOid|newCommitOid)"\s*:\s*"([a-f0-9]{7,64})"/);
+    if (match?.[1]) {
+      cachedHeadSha = { key: window.location.pathname, value: match[1] };
+      return match[1];
+    }
+  }
+  return undefined;
+}
+
+// GitHub's current PR markup no longer exposes the head SHA as a meta tag or
+// data attribute; it only appears inside diff-service URLs, e.g.
+// `?end_commit_oid=<head>`, `?sha2=<head>`, and `/diffs/<base>..<head>`.
+function headShaFromDiffUrls(): string | undefined {
+  const urlAttributes = ["href", "src", "action", "data-url"] as const;
+  const markers = ["end_commit_oid=", "sha2=", "/diffs/"];
+  const selector = urlAttributes
+    .flatMap((attribute) => markers.map((marker) => `[${attribute}*="${marker}"]`))
+    .join(",");
+  for (const element of document.querySelectorAll(selector)) {
+    for (const attribute of urlAttributes) {
+      const value = element.getAttribute(attribute);
+      if (!value) continue;
+      const match = value.match(/(?:end_commit_oid|sha2)=([a-f0-9]{7,64})/i)
+        ?? value.match(/\/diffs\/[a-f0-9]{7,64}\.\.([a-f0-9]{7,64})/i);
+      if (match?.[1]) return match[1];
+    }
   }
   return undefined;
 }
@@ -175,15 +377,164 @@ function findActiveAnchor(activeFile?: string): DiffAnchor | undefined {
     ?? (activeFile ? findVisibleAnchor(activeFile, headSha) : undefined);
 }
 
-function scrollToFile(path: string): boolean {
-  const candidates = Array.from(document.querySelectorAll(FILE_SELECTOR));
-  const target = candidates.find((element) => readFilePath(element) === path);
+const STEP_HIGHLIGHT_CLASS = "primer-step-highlight";
+let stepHighlightStyle: HTMLStyleElement | undefined;
+
+function ensureStepHighlightStyle(): void {
+  if (stepHighlightStyle?.isConnected) return;
+  stepHighlightStyle = document.createElement("style");
+  stepHighlightStyle.textContent = `
+    .${STEP_HIGHLIGHT_CLASS} {
+      box-shadow: inset 3px 0 0 #315cf5 !important;
+      background-color: rgba(49, 92, 245, 0.07) !important;
+    }
+  `;
+  document.head.append(stepHighlightStyle);
+}
+
+function clearStepHighlights(): void {
+  for (const element of document.querySelectorAll(`.${STEP_HIGHLIGHT_CLASS}`)) {
+    element.classList.remove(STEP_HIGHLIGHT_CLASS);
+  }
+}
+
+function highlightMountedRange(
+  file: Element,
+  path: string,
+  startLine: number,
+  endLine: number,
+  side: DiffSide,
+): void {
+  ensureStepHighlightStyle();
+  for (const element of file.querySelectorAll(LINE_SELECTOR)) {
+    const point = pointFromLineElement(element, path);
+    if (!point || point.side !== side) continue;
+    if (point.line < startLine || point.line > endLine) continue;
+    const row = element.closest("tr, [role='row'], [data-testid='diff-line']") ?? element;
+    row.classList.add(STEP_HIGHLIGHT_CLASS);
+  }
+}
+
+function scrollToMountedDiff(
+  path: string,
+  line?: number,
+  side: DiffSide = "RIGHT",
+  exactLineOnly = false,
+  endLine?: number,
+): boolean {
+  const target = findFileElement(path);
   if (!target) return false;
-  // Avoid publishing every intermediate file as the active review step while
-  // traveling through a large diff. The destination is still aligned at the
-  // start of the GitHub viewport.
-  target.scrollIntoView({ behavior: "auto", block: "start" });
+  const lineTarget = line
+    ? Array.from(target.querySelectorAll(LINE_SELECTOR)).find((element) => {
+        const point = pointFromLineElement(element, path);
+        return point?.line === line && point.side === side;
+      })
+    : undefined;
+  if (line && exactLineOnly && !lineTarget) return false;
+  const scrollTarget = lineTarget?.closest("tr, [role='row'], [data-testid='diff-line']") ?? lineTarget ?? target;
+  animateDiffScroll(scrollTarget, lineTarget ? "center" : "start");
+  clearStepHighlights();
+  if (lineTarget && line) {
+    highlightMountedRange(target, path, line, Math.max(endLine ?? line, line), side);
+  }
+  if (scrollTarget instanceof HTMLElement) {
+    scrollTarget.animate(
+      [
+        { outline: "2px solid transparent", outlineOffset: "2px" },
+        { outline: "2px solid #315cf5", outlineOffset: "2px" },
+        { outline: "2px solid transparent", outlineOffset: "2px" },
+      ],
+      { duration: 1_400, easing: "ease-out" },
+    );
+  }
   return true;
+}
+
+function waitForMountedLine(
+  path: string,
+  line: number,
+  side: DiffSide,
+  endLine?: number,
+  timeoutMs = 2_000,
+): Promise<boolean> {
+  if (scrollToMountedDiff(path, line, side, true, endLine)) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const timeout = window.setTimeout(() => {
+      observer.disconnect();
+      resolve(false);
+    }, timeoutMs);
+    const observer = new MutationObserver(() => {
+      if (!scrollToMountedDiff(path, line, side, true, endLine)) return;
+      window.clearTimeout(timeout);
+      observer.disconnect();
+      resolve(true);
+    });
+    observer.observe(document.documentElement, { childList: true, subtree: true });
+  });
+}
+
+async function navigateToDiff(
+  path: string,
+  line?: number,
+  side: DiffSide = "RIGHT",
+  endLine?: number,
+): Promise<boolean> {
+  if (scrollToMountedDiff(path, line, side, false, endLine)) return true;
+
+  // If GitHub has not mounted the file yet, navigate to the stable file
+  // fragment first. Exact line scrolling is retried once the diff is mounted;
+  // line fragments do not exist for collapsed or large unloaded diffs.
+  const fragment = await createGitHubDiffFragment(path);
+  const filesUrl = createPullFilesUrl(window.location.href, fragment);
+  if (!filesUrl) return false;
+
+  const onFilesChanged = /\/pull\/\d+\/(?:files|changes)(?:\/|$)/.test(window.location.pathname);
+  if (!onFilesChanged) {
+    window.location.assign(filesUrl);
+    return true;
+  }
+
+  // GitHub often keeps a lightweight per-file anchor mounted even when its
+  // diff rows are virtualized. Scroll to that placeholder ourselves so the
+  // virtualizer can hydrate it without an immediate browser hash jump.
+  const fragmentTarget = document.getElementById(fragment);
+  if (fragmentTarget) {
+    animateDiffScroll(fragmentTarget, "start");
+    if (line) void waitForMountedLine(path, line, side, endLine);
+    return true;
+  }
+
+  // GitHub's diff is virtualized. Its native file/line fragment asks the PR
+  // router to mount the relevant diff even when no matching element exists yet.
+  if (window.location.hash !== `#${fragment}`) {
+    window.location.hash = fragment;
+    if (line) void waitForMountedLine(path, line, side);
+    return true;
+  }
+
+  const nativeLink = Array.from(document.querySelectorAll<HTMLAnchorElement>("a[href]"))
+    .find((link) => link.getAttribute("href")?.endsWith(`#${fragment}`));
+  if (nativeLink) {
+    nativeLink.click();
+    if (line) void waitForMountedLine(path, line, side, endLine);
+    return true;
+  }
+
+  window.location.assign(filesUrl);
+  return true;
+}
+
+async function navigateToAnchor(anchor: DiffAnchor): Promise<boolean> {
+  const currentHeadSha = readHeadSha();
+  if (currentHeadSha && !isSameGitCommit(currentHeadSha, anchor.headSha)) {
+    // The PR moved past the plan's commit, so exact line numbers are suspect.
+    // Still glide to the file: a hard URL fallback in the panel snaps the
+    // page and loses the reviewer's place entirely.
+    return navigateToDiff(anchor.path);
+  }
+  // A range anchor scrolls to its first line and highlights through the last.
+  const startLine = anchor.startLine ?? anchor.line;
+  return navigateToDiff(anchor.path, startLine, anchor.startSide ?? anchor.side, anchor.line);
 }
 
 function findAnchorLineElement(anchor: DiffAnchor): Element | undefined {
@@ -207,6 +558,8 @@ function findCommentTrigger(lineElement: Element): HTMLElement | undefined {
     "button[aria-label*='Add line comment']",
     "button[aria-label*='add line comment']",
     "button[data-testid*='add-line-comment']",
+    "button[data-add-comment-button]",
+    "button[aria-label='Add comment']",
   ].join(", ");
   if (lineElement instanceof HTMLElement && lineElement.matches(selector)) return lineElement;
   const scopes = [
@@ -228,15 +581,81 @@ const COMMENT_COMPOSER_SELECTOR = [
   "textarea[placeholder*='comment' i]",
   "textarea[aria-label*='comment' i]",
   "[contenteditable='true'][data-testid*='comment']",
+  "[contenteditable='true'][aria-label*='comment' i]",
+  "[contenteditable='true'][role='textbox']",
+  // Last resort for markup drift: any fresh visible editor. Callers only
+  // accept composers that were absent before the trigger click.
+  "textarea",
 ].join(", ");
+
+// GitHub's /changes diff UI mounts its "Add comment" button through React
+// hover state, so it does not exist in the DOM until the pointer visits the
+// line. Synthetic pointer/mouse events reproduce that.
+async function hoverForCommentTrigger(lineElement: Element): Promise<HTMLElement | undefined> {
+  // Try the line-number cell first, then the code cell in the same row — the
+  // /changes UI mounts the button off hover state on the row's cells.
+  const row = lineElement.closest("tr, [role='row'], [data-testid='diff-line']");
+  const targets = [
+    lineElement.closest("td, [role='gridcell']") ?? lineElement,
+    ...(row ? Array.from(row.querySelectorAll("td.diff-text-cell, [role='gridcell']")) : []),
+  ];
+  for (const cell of targets) {
+    dispatchHover(cell);
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 100));
+      const trigger = findCommentTrigger(lineElement);
+      if (trigger) return trigger;
+    }
+  }
+  return undefined;
+}
+
+function dispatchHover(cell: Element): void {
+  const rect = cell.getBoundingClientRect();
+  const options = {
+    bubbles: true,
+    cancelable: true,
+    clientX: rect.x + Math.min(12, rect.width / 2),
+    clientY: rect.y + Math.min(8, rect.height / 2),
+  };
+  for (const type of ["pointerover", "pointerenter", "pointermove"]) {
+    cell.dispatchEvent(new PointerEvent(type, { ...options, pointerId: 1 }));
+  }
+  for (const type of ["mouseover", "mouseenter", "mousemove"]) {
+    cell.dispatchEvent(new MouseEvent(type, options));
+  }
+}
+
+// React buttons can ignore a bare synthetic click; replay the full pointer
+// gesture (verified to open the /changes comment composer via console repro).
+function dispatchFullClick(trigger: HTMLElement): void {
+  const rect = trigger.getBoundingClientRect();
+  const options = {
+    bubbles: true,
+    cancelable: true,
+    clientX: rect.x + Math.min(4, rect.width / 2),
+    clientY: rect.y + Math.min(4, rect.height / 2),
+    button: 0,
+  };
+  trigger.dispatchEvent(new PointerEvent("pointerdown", { ...options, pointerId: 1 }));
+  trigger.dispatchEvent(new MouseEvent("mousedown", options));
+  trigger.focus();
+  trigger.dispatchEvent(new PointerEvent("pointerup", { ...options, pointerId: 1 }));
+  trigger.dispatchEvent(new MouseEvent("mouseup", options));
+  trigger.dispatchEvent(new MouseEvent("click", options));
+}
 
 function waitForNewComposer(
   file: Element,
   existing: Set<Element>,
   timeoutMs = 3_000,
 ): Promise<HTMLElement | undefined> {
-  const find = () => Array.from(file.querySelectorAll<HTMLElement>(COMMENT_COMPOSER_SELECTOR))
-    .find((element) => !existing.has(element) && isVisible(element));
+  const find = () =>
+    Array.from(file.querySelectorAll<HTMLElement>(COMMENT_COMPOSER_SELECTOR))
+      .find((element) => !existing.has(element) && isVisible(element))
+    // The /changes UI can mount the composer outside the file container.
+    ?? Array.from(document.querySelectorAll<HTMLElement>(COMMENT_COMPOSER_SELECTOR))
+      .find((element) => !existing.has(element) && isVisible(element));
   const immediate = find();
   if (immediate) return Promise.resolve(immediate);
 
@@ -254,7 +673,9 @@ function waitForNewComposer(
       if (composer) finish(composer);
     });
     const timer = window.setTimeout(() => finish(), timeoutMs);
-    observer.observe(file, { childList: true, subtree: true });
+    // Watch the whole document: the /changes UI can portal the composer
+    // outside the file container. The observer lives for at most timeoutMs.
+    observer.observe(document.body, { childList: true, subtree: true });
   });
 }
 
@@ -278,7 +699,7 @@ function fillCommentComposer(composer: HTMLElement, body: string): void {
 async function draftNativeComment(anchor: DiffAnchor, body: string): Promise<CommentDraftResult> {
   if (!body.trim()) return { ok: false, error: "invalid-request" };
   const currentHeadSha = readHeadSha();
-  if (!currentHeadSha || currentHeadSha !== anchor.headSha) {
+  if (!currentHeadSha || !isSameGitCommit(currentHeadSha, anchor.headSha)) {
     return { ok: false, error: "stale-anchor" };
   }
 
@@ -291,11 +712,15 @@ async function draftNativeComment(anchor: DiffAnchor, body: string): Promise<Com
   if (anchor.startLine !== undefined) return { ok: false, error: "range-not-supported" };
 
   const file = findFileElement(anchor.path);
-  const trigger = findCommentTrigger(lineElement);
+  const trigger = findCommentTrigger(lineElement) ?? await hoverForCommentTrigger(lineElement);
   if (!file || !trigger) return { ok: false, error: "composer-not-found" };
-  const existing = new Set(file.querySelectorAll(COMMENT_COMPOSER_SELECTOR));
-  trigger.click();
-  const composer = await waitForNewComposer(file, existing);
+  const existing = new Set(document.querySelectorAll(COMMENT_COMPOSER_SELECTOR));
+  dispatchFullClick(trigger);
+  let composer = await waitForNewComposer(file, existing);
+  if (!composer) {
+    trigger.click();
+    composer = await waitForNewComposer(file, existing, 1_500);
+  }
   if (!composer) return { ok: false, error: "composer-not-found" };
   fillCommentComposer(composer, body.trim());
   return { ok: true, status: "drafted" };
@@ -309,6 +734,32 @@ export default defineContentScript({
     let scheduledFrame: number | undefined;
     let mutationTimer: number | undefined;
     let viewportResizeTimer: number | undefined;
+    let stableViewportWidth = window.innerWidth;
+    let frozenRootWidth: { value: string; priority: string } | undefined;
+
+    const freezeGitHubLayout = () => {
+      if (frozenRootWidth) return;
+      const rootStyle = document.documentElement.style;
+      frozenRootWidth = {
+        value: rootStyle.getPropertyValue("width"),
+        priority: rootStyle.getPropertyPriority("width"),
+      };
+      // Chrome's side panel normally makes GitHub reflow its entire diff for
+      // every pixel of a divider drag. Keep the last settled document width so
+      // intermediate frames only clip/reveal it, then perform one final reflow.
+      rootStyle.setProperty("width", `${stableViewportWidth}px`, "important");
+    };
+    const releaseGitHubLayout = () => {
+      if (!frozenRootWidth) return;
+      const rootStyle = document.documentElement.style;
+      if (frozenRootWidth.value) {
+        rootStyle.setProperty("width", frozenRootWidth.value, frozenRootWidth.priority);
+      } else {
+        rootStyle.removeProperty("width");
+      }
+      frozenRootWidth = undefined;
+      stableViewportWidth = window.innerWidth;
+    };
 
     const readContext = () => {
       const activeFile = findVisibleFile();
@@ -335,10 +786,12 @@ export default defineContentScript({
       void browser.runtime.sendMessage({ type: "primer:context-observed", context });
     };
     const schedulePublishForNextFrame = () => {
+      if (viewportResizeTimer !== undefined) return;
       if (scheduledFrame !== undefined) return;
       scheduledFrame = window.requestAnimationFrame(publish);
     };
     const schedulePublishAfterMutation = () => {
+      if (viewportResizeTimer !== undefined) return;
       if (mutationTimer !== undefined) window.clearTimeout(mutationTimer);
       mutationTimer = window.setTimeout(() => {
         mutationTimer = undefined;
@@ -346,11 +799,25 @@ export default defineContentScript({
       }, 120);
     };
     const schedulePublishAfterResize = () => {
+      freezeGitHubLayout();
+      // A resize can also produce scroll events through browser scroll anchoring.
+      // Cancel work queued by either source so no geometry is read mid-drag.
+      if (scheduledFrame !== undefined) {
+        window.cancelAnimationFrame(scheduledFrame);
+        scheduledFrame = undefined;
+      }
+      if (mutationTimer !== undefined) {
+        window.clearTimeout(mutationTimer);
+        mutationTimer = undefined;
+      }
       if (viewportResizeTimer !== undefined) window.clearTimeout(viewportResizeTimer);
       viewportResizeTimer = window.setTimeout(() => {
         viewportResizeTimer = undefined;
+        // This becomes the baseline for the next drag, so consecutive width
+        // adjustments each freeze and snap independently.
+        releaseGitHubLayout();
         schedulePublishForNextFrame();
-      }, 180);
+      }, RESIZE_SETTLE_MS);
     };
 
     const observer = new MutationObserver(schedulePublishAfterMutation);
@@ -364,17 +831,32 @@ export default defineContentScript({
     ctx.addEventListener(window, "popstate", schedulePublishForNextFrame);
     ctx.onInvalidated(() => {
       observer.disconnect();
+      cancelDiffScroll();
       if (scheduledFrame !== undefined) window.cancelAnimationFrame(scheduledFrame);
       if (mutationTimer !== undefined) window.clearTimeout(mutationTimer);
       if (viewportResizeTimer !== undefined) window.clearTimeout(viewportResizeTimer);
+      releaseGitHubLayout();
     });
 
-    browser.runtime.onMessage.addListener((message) => {
+    // The native chrome messaging API ignores a Promise returned from an
+    // onMessage listener, so the sender would always resolve to undefined and
+    // the side panel would treat every navigation as failed. Deliver async
+    // results through sendResponse and keep the channel open by returning true.
+    browser.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       if (!isPrimerExtensionMessage(message)) return undefined;
-      if (message.type === "primer:request-context") return Promise.resolve(readContext());
-      if (message.type === "primer:navigate-file") return Promise.resolve(scrollToFile(message.path));
+      const respond = (result: Promise<unknown> | unknown): true => {
+        void Promise.resolve(result)
+          .catch(() => false)
+          .then((value) => sendResponse(value));
+        return true;
+      };
+      if (message.type === "primer:request-context") return respond(readContext());
+      if (message.type === "primer:navigate-file") {
+        return respond(navigateToDiff(message.path, message.line, message.side));
+      }
+      if (message.type === "primer:navigate-anchor") return respond(navigateToAnchor(message.anchor));
       if (message.type === "primer:draft-comment") {
-        return draftNativeComment(message.anchor, message.body);
+        return respond(draftNativeComment(message.anchor, message.body));
       }
       return undefined;
     });

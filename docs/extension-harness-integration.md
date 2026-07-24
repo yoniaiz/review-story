@@ -8,10 +8,9 @@ Add these build-time variables to the extension's environment type and local `.e
 
 ```dotenv
 VITE_DEMO_HEAD_SHA=<current PR head SHA>
-VITE_HARNESS_ACCESS_TOKEN=<same value as HARNESS_ACCESS_TOKEN, if enabled>
 ```
 
-The access token is a single-user protection mechanism. It may be sent as a bearer token on normal requests and as the `access_token` query parameter on the SSE URL because `EventSource` cannot set request headers.
+The harness session token (obtained via GitHub sign-in) is sent as a bearer token on normal requests and as the `access_token` query parameter on the SSE URL because `EventSource` cannot set request headers.
 
 ## Start and resume a review
 
@@ -42,10 +41,14 @@ Both return the updated session. `complete` is also the semantic result of a cha
 POST /api/review-sessions/:sessionId/chat/messages
 Content-Type: application/json
 
-{ "message": "What should I scrutinize here?" }
+{
+  "message": "What should I scrutinize here?",
+  "chapterId": "chapter-auth",
+  "stepId": "src/auth/session.ts"
+}
 ```
 
-The response contains structured user and assistant turns. Render assistant citations next to its response. Drafts remain private to the harness until a user explicitly publishes them:
+`chapterId` and `stepId` are required and must identify a generated review step. The response contains structured user and assistant turns carrying the same scope. Only render turns for the active step; model history is isolated to that step as well. The PR summary remains the global analysis shown before chapter 1. Render assistant citations next to its response. Drafts remain private to the harness until a user explicitly publishes them:
 
 ```http
 POST /api/review-sessions/:sessionId/drafts

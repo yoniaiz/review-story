@@ -14,7 +14,48 @@ describe("story artifact review plan adapter", () => {
     expect(plan.chapters.find(({ id }) => id === "ch_api")?.status).toBe("done");
     expect(route.find(({ chapter }) => chapter.id === "ch_api")?.step.status).toBe("reviewed");
     expect(route.every(({ step }) => step.evidence.length > 0)).toBe(true);
+    expect(route.every(({ step }) => step.line === undefined || step.line > 0)).toBe(true);
+    expect(plan.chapters.every(({ entryPoint, fileIds }) => fileIds.includes(entryPoint))).toBe(true);
     expect(plan.headSha).toBe(artifact.meta.head_oid);
+  });
+
+  it("aggregates file import facts into chapter-level dependency edges", () => {
+    const artifact = StoryArtifactSchema.parse(artifactFixture);
+    const plan = storyArtifactToReviewPlan(artifact, "acme/review-story-demo");
+
+    expect(plan.graph.edges).toEqual([
+      { source: "ch_api", target: "ch_schema", kind: "imports" },
+      { source: "ch_login_ui", target: "ch_api", kind: "imports" },
+    ]);
+  });
+
+  it("derives per-file severity from citations and attention floors, capped by the chapter", () => {
+    const artifact = StoryArtifactSchema.parse(artifactFixture);
+    const plan = storyArtifactToReviewPlan(artifact, "acme/review-story-demo");
+    const severityOf = (path: string) => plan.files.find((file) => file.path === path)?.severity;
+
+    expect(severityOf("src/api/auth/refresh.ts")).toBe("needs-human");
+    expect(severityOf("src/api/auth/client.ts")).toBe("noise");
+    expect(severityOf("src/db/schema/session.ts")).toBe("standard");
+    expect(severityOf("src/db/migrations/024_refresh_tokens.sql")).toBe("standard");
+    expect(severityOf("src/web/auth/session-client.ts")).toBe("standard");
+    expect(severityOf("src/web/login/LoginPage.tsx")).toBe("noise");
+  });
+
+  it("falls back to chapter-level severity for artifacts without file attention floors", () => {
+    const artifact = StoryArtifactSchema.parse(artifactFixture);
+    const legacy = StoryArtifactSchema.parse({
+      ...artifact,
+      chapters: artifact.chapters.map((chapter) => ({
+        ...chapter,
+        files: chapter.files.map(({ attention_floor, imports_changed_files, ...file }) => file),
+      })),
+    });
+    const plan = storyArtifactToReviewPlan(legacy, "acme/review-story-demo");
+
+    expect(plan.files.filter(({ chapterId }) => chapterId === "ch_api")
+      .every(({ severity }) => severity === "needs-human")).toBe(true);
+    expect(plan.graph.edges).toEqual([]);
   });
 
   it("uses the contract's track chapter order instead of artifact storage order", () => {

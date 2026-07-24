@@ -65,6 +65,67 @@ describe("manifest builder", () => {
     expect(service.relatedTests.paths).toEqual(["tests/service.test.ts"]);
   });
 
+  it("resolves bare and aliased monorepo imports between changed files", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "review-story-manifest-bare-"));
+    temporaryDirectories.push(workspace);
+    await mkdir(join(workspace, "packages", "twenty-front", "src", "modules", "auth"), {
+      recursive: true,
+    });
+    await mkdir(join(workspace, "packages", "twenty-shared", "src", "utils"), {
+      recursive: true,
+    });
+    await mkdir(join(workspace, "packages", "twenty-server", "src", "core"), {
+      recursive: true,
+    });
+    await writeFile(
+      join(workspace, "packages", "twenty-front", "src", "modules", "auth", "SignIn.tsx"),
+      'import { formatName } from "twenty-shared/utils";\nimport { session } from "@/modules/auth/session";\nexport const SignIn = () => formatName(session);\n',
+    );
+    await writeFile(
+      join(workspace, "packages", "twenty-front", "src", "modules", "auth", "session.ts"),
+      "export const session = {};\n",
+    );
+    await writeFile(
+      join(workspace, "packages", "twenty-shared", "src", "utils", "index.ts"),
+      "export const formatName = (value: unknown) => String(value);\n",
+    );
+    await writeFile(
+      join(workspace, "packages", "twenty-server", "src", "core", "user.service.ts"),
+      'import { formatName } from "twenty-shared/utils";\nexport class UserService { format = formatName; }\n',
+    );
+
+    const manifest = await buildManifest(
+      [
+        changedFile("packages/twenty-front/src/modules/auth/SignIn.tsx", "@@ -1 +1 @@"),
+        changedFile("packages/twenty-front/src/modules/auth/session.ts", "@@ -1 +1 @@"),
+        changedFile("packages/twenty-shared/src/utils/index.ts", "@@ -1 +1 @@"),
+        changedFile("packages/twenty-server/src/core/user.service.ts", "@@ -1 +1 @@"),
+      ],
+      workspace,
+    );
+    const signIn = manifest.find(
+      (row) => row.path === "packages/twenty-front/src/modules/auth/SignIn.tsx",
+    )!;
+    const shared = manifest.find(
+      (row) => row.path === "packages/twenty-shared/src/utils/index.ts",
+    )!;
+    const server = manifest.find(
+      (row) => row.path === "packages/twenty-server/src/core/user.service.ts",
+    )!;
+
+    expect(signIn.importsChangedFiles).toEqual([
+      "packages/twenty-front/src/modules/auth/session.ts",
+      "packages/twenty-shared/src/utils/index.ts",
+    ]);
+    expect(server.importsChangedFiles).toEqual([
+      "packages/twenty-shared/src/utils/index.ts",
+    ]);
+    expect(shared.importedByChangedFiles).toEqual([
+      "packages/twenty-front/src/modules/auth/SignIn.tsx",
+      "packages/twenty-server/src/core/user.service.ts",
+    ]);
+  });
+
   it("builds enriched rows from a workspace fixture", async () => {
     const workspace = new URL("./fixtures/manifest/", import.meta.url).pathname;
     const manifest = await buildManifest(

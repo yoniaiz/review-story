@@ -148,6 +148,7 @@ function countSourceLines(source: string): number {
 function addChangedImportEdges(rows: ManifestRow[]): void {
   const paths = new Set(rows.map((row) => row.path));
   const byPath = new Map(rows.map((row) => [row.path, row]));
+  const bareIndex = buildBareSpecifierIndex(rows);
   const importExpression =
     /(?:import|export)\s+(?:[^"']*?\s+from\s+)?["']([^"']+)["']|require\(\s*["']([^"']+)["']\s*\)|import\(\s*["']([^"']+)["']\s*\)/g;
 
@@ -155,9 +156,11 @@ function addChangedImportEdges(rows: ManifestRow[]): void {
     if (!row.content) continue;
     for (const match of row.content.matchAll(importExpression)) {
       const specifier = match[1] ?? match[2] ?? match[3];
-      if (!specifier?.startsWith(".")) continue;
-      const target = resolveChangedImport(row.path, specifier, paths);
-      if (!target) continue;
+      if (!specifier) continue;
+      const target = specifier.startsWith(".")
+        ? resolveChangedImport(row.path, specifier, paths)
+        : resolveBareImport(row.path, specifier, bareIndex);
+      if (!target || target === row.path) continue;
       row.importsChangedFiles.push(target);
       byPath.get(target)?.importedByChangedFiles.push(row.path);
     }
@@ -166,6 +169,100 @@ function addChangedImportEdges(rows: ManifestRow[]): void {
   for (const row of rows) {
     row.importedByChangedFiles = [...new Set(row.importedByChangedFiles)].sort();
   }
+}
+
+const bareSourceExtensionPattern = /\.(?:[cm]?[jt]sx?|json)$/i;
+// Path segments that package aliases and tsconfig baseUrl roots typically hide.
+const rootSegments = new Set(["src", "lib", "source"]);
+const maxSuffixSegments = 5;
+
+/**
+ * Index changed files by the trailing path segments a bare or aliased import
+ * specifier could refer to (e.g. `twenty-shared/utils` →
+ * `packages/twenty-shared/src/utils/index.ts`), so cross-package imports
+ * inside the PR resolve without workspace tsconfig/package.json resolution.
+ */
+function buildBareSpecifierIndex(rows: ManifestRow[]): Map<string, string[]> {
+  const index = new Map<string, string[]>();
+  const add = (key: string, path: string) => {
+    if (!key) return;
+    const existing = index.get(key);
+    if (existing) {
+      if (!existing.includes(path)) existing.push(path);
+    } else {
+      index.set(key, [path]);
+    }
+  };
+  for (const row of rows) {
+    if (!bareSourceExtensionPattern.test(row.path)) continue;
+    let stem = row.path.replace(bareSourceExtensionPattern, "");
+    const isIndex = stem.endsWith("/index");
+    if (isIndex) stem = stem.slice(0, -"/index".length);
+    const segments = stem.split("/");
+    const variants = [segments];
+    const withoutRoots = segments.filter((segment) => !rootSegments.has(segment));
+    if (withoutRoots.length !== segments.length) variants.push(withoutRoots);
+    for (const variant of variants) {
+      const maxLength = Math.min(variant.length, maxSuffixSegments);
+      // Single-segment keys only for index/package-root files — a lone
+      // basename like `utils` is too ambiguous to treat as a module id.
+      const minLength = isIndex ? 1 : 2;
+      for (let length = minLength; length <= maxLength; length += 1) {
+        add(variant.slice(variant.length - length).join("/"), row.path);
+      }
+    }
+  }
+  return index;
+}
+
+function resolveBareImport(
+  fromPath: string,
+  specifier: string,
+  index: Map<string, string[]>,
+): string | null {
+  let clean = specifier.split(/[?#]/, 1)[0] ?? specifier;
+  clean = clean.replace(bareSourceExtensionPattern, "");
+  if (clean.endsWith("/index")) clean = clean.slice(0, -"/index".length);
+  const keys = [clean];
+  // `@/foo` and `~/foo` style aliases point at a source root within a package.
+  if (/^[@~]\//.test(clean)) keys.push(clean.slice(2));
+  // `@scope/pkg/rest` may match a directory named `pkg` without the scope.
+  else if (clean.startsWith("@") && clean.includes("/")) {
+    keys.push(clean.slice(clean.indexOf("/") + 1));
+  }
+  for (const key of keys) {
+    const candidates = index.get(key);
+    if (!candidates?.length) continue;
+    return pickClosestPath(fromPath, candidates);
+  }
+  return null;
+}
+
+function pickClosestPath(fromPath: string, candidates: string[]): string {
+  let best = candidates[0]!;
+  let bestScore = -1;
+  for (const candidate of candidates) {
+    const score = sharedPrefixSegments(fromPath, candidate);
+    if (score > bestScore || (score === bestScore && candidate < best)) {
+      best = candidate;
+      bestScore = score;
+    }
+  }
+  return best;
+}
+
+function sharedPrefixSegments(left: string, right: string): number {
+  const leftSegments = left.split("/");
+  const rightSegments = right.split("/");
+  let count = 0;
+  while (
+    count < leftSegments.length &&
+    count < rightSegments.length &&
+    leftSegments[count] === rightSegments[count]
+  ) {
+    count += 1;
+  }
+  return count;
 }
 
 function resolveChangedImport(

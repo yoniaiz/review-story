@@ -93,12 +93,16 @@
         {
           "path": "src/db/schema/session.ts",
           "note": "adds refresh-token family and rotation columns",
-          "anchor_hunks": [[14, 41]]
+          "anchor_hunks": [[14, 41]],
+          "attention_floor": "STANDARD",
+          "imports_changed_files": []
         },
         {
           "path": "src/db/migrations/024_refresh_tokens.sql",
           "note": "backfills token-family IDs before making them required",
-          "anchor_hunks": [[1, 32]]
+          "anchor_hunks": [[1, 32]],
+          "attention_floor": "SKIM",
+          "imports_changed_files": []
         }
       ],
       "scrutinize": [
@@ -141,12 +145,16 @@
         {
           "path": "src/api/auth/refresh.ts",
           "note": "implements one-time refresh and replay handling",
-          "anchor_hunks": [[38, 92]]
+          "anchor_hunks": [[38, 92]],
+          "attention_floor": "STANDARD",
+          "imports_changed_files": ["src/db/schema/session.ts", "src/api/auth/client.ts"]
         },
         {
           "path": "src/api/auth/client.ts",
           "note": "wraps the external identity-provider token exchange",
-          "anchor_hunks": [[1, 48]]
+          "anchor_hunks": [[1, 48]],
+          "attention_floor": "SKIM",
+          "imports_changed_files": []
         }
       ],
       "scrutinize": [
@@ -199,12 +207,16 @@
         {
           "path": "src/web/auth/session-client.ts",
           "note": "deduplicates refresh requests and retries the original call once",
-          "anchor_hunks": [[22, 71]]
+          "anchor_hunks": [[22, 71]],
+          "attention_floor": "SKIM",
+          "imports_changed_files": ["src/api/auth/refresh.ts"]
         },
         {
           "path": "src/web/login/LoginPage.tsx",
           "note": "shows an expired-session message after refresh failure",
-          "anchor_hunks": [[44, 63]]
+          "anchor_hunks": [[44, 63]],
+          "attention_floor": "SKIM",
+          "imports_changed_files": []
         }
       ],
       "scrutinize": [
