@@ -60,6 +60,18 @@ export function storyArtifactToReviewPlan(
   const chapters = orderedChapters.map((chapter) => {
     const summaryEntryPoint = chapter.summary.evidence.find((evidence) =>
       chapter.files.some((file) => file.path === evidence.path));
+    const hasChurn = chapter.files.some(
+      (file) => file.additions !== undefined || file.deletions !== undefined,
+    );
+    const churn = hasChurn
+      ? chapter.files.reduce(
+        (totals, file) => ({
+          additions: totals.additions + (file.additions ?? 0),
+          deletions: totals.deletions + (file.deletions ?? 0),
+        }),
+        { additions: 0, deletions: 0 },
+      )
+      : undefined;
     return {
       id: chapter.id,
       title: chapter.title,
@@ -67,6 +79,7 @@ export function storyArtifactToReviewPlan(
       entryPoint: summaryEntryPoint?.path ?? chapter.files[0]!.path,
       fileIds: chapter.files.map(({ path }) => path),
       status: completed.has(chapter.id) ? "done" as const : "pending" as const,
+      ...(churn ?? {}),
       steps: chapter.files.map((file, index) => {
         const claimAnchor = [chapter.summary, ...chapter.scrutinize]
           .flatMap((claim) => claim.evidence)

@@ -43,6 +43,10 @@ export const StoryMetaSchema = z.object({
 export const StoryFileSchema = z.object({
   path: z.string().min(1),
   note: z.string().min(1),
+  // Diff churn from the manifest; optional so artifacts generated before
+  // these fields existed still validate.
+  additions: z.number().int().nonnegative().optional(),
+  deletions: z.number().int().nonnegative().optional(),
   anchor_hunks: z.array(LineRangeSchema),
   attention_floor: AttentionLevelSchema.optional(),
   imports_changed_files: z.array(z.string().min(1)).optional(),
@@ -372,3 +376,5 @@ export interface Analyzer {
     context?: AnalyzerContext,
   ): AsyncIterable<StoryStreamEvent>;
 }
+
+export * from "./primer-context.js";

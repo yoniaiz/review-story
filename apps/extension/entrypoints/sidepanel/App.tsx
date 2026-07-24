@@ -47,6 +47,8 @@ import {
   type MyPullSummary,
 } from "../../primer/lib/harness-client";
 import { clearStoredAuth, getStoredAuth, signIn, signOut } from "../../primer/lib/auth";
+import { applyAuthorRiskAreas, unmatchedRiskAreas } from "../../primer/lib/author-context";
+import type { PrimerContextParseResult } from "@review-story/contracts";
 import { isNearScrollEnd } from "../../primer/lib/chat-scroll";
 import { storyArtifactToReviewPlan } from "../../primer/lib/story-review-plan";
 import { upsertGeneratedChapter } from "../../primer/lib/story-stream-state";
@@ -132,27 +134,6 @@ function getInitialContext(): GitHubPageContext {
   }
   if (preview === "github") return getPageContext("https://github.com/twentyhq/twenty");
   return getPageContext("");
-}
-
-async function navigateGitHubToFile(path: string): Promise<void> {
-  if (new URLSearchParams(window.location.search).has("preview")) return;
-  const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
-  if (tab?.id === undefined) return;
-
-  const scrolled = await browser.tabs.sendMessage(tab.id, {
-    type: "primer:navigate-file",
-    path,
-  }).then((result) => result === true).catch(() => false);
-  if (scrolled || !tab.url) return;
-
-  // GitHub's stable file anchor is `diff-${sha256(path)}`. Updating the active
-  // tab fragment gives navigation a reliable fallback when the content script
-  // was not injected into an already-open PR tab.
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(path));
-  const hash = [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
-  const destination = new URL(tab.url);
-  destination.hash = `diff-${hash}`;
-  await browser.tabs.update(tab.id, { url: destination.href });
 }
 
 function IconButton({ label, children, onClick, pressed }: { label: string; children: ReactNode; onClick?: () => void; pressed?: boolean }) {
@@ -490,64 +471,6 @@ function ContextLauncher({ context, auth, onExpired }: {
   );
 }
 
-function ReviewOverview({ context, session, plan, route, onStart }: {
-  context: GitHubPageContext;
-  session: HarnessSession & { artifact: NonNullable<HarnessSession["artifact"]> };
-  plan: ReviewPlan;
-  route: ReturnType<typeof getExtensionReviewRoute>;
-  onStart: (routeIndex: number) => void;
-}) {
-  const deepReadCount = session.artifact.chapters.filter(({ attention }) =>
-    attention.level === "DEEP_READ").length;
-
-  return (
-    <div className="overview-scroll">
-      <section className="review-overview">
-        <div className="overview-hero">
-          <p className="utility-label">{context.owner}/{context.repository} · #{context.pullNumber}</p>
-          <div className="overview-signal"><Sparkles size={16} /></div>
-          <h1>I’m ready to guide this review.</h1>
-          <p className="overview-brief">{session.artifact.exec_summary.text}</p>
-          <div className="overview-stats" aria-label="Pull request analysis summary">
-            <span><strong>{plan.stats.totalFiles}</strong> changed files</span>
-            <span><strong>{plan.stats.chapters}</strong> review chapters</span>
-            <span><strong>{deepReadCount}</strong> deep-read areas</span>
-          </div>
-          <button className="primary-action overview-start" type="button" disabled={!route.length} onClick={() => onStart(0)}>
-            Begin guided review <ArrowRight size={15} />
-          </button>
-        </div>
-
-        <div className="overview-section-heading">
-          <span>Review path</span>
-          <small>{route.length} evidence-backed steps</small>
-        </div>
-        <div className="overview-chapters">
-          {plan.chapters.map((chapter, index) => {
-            const artifactChapter = session.artifact.chapters.find(({ id }) => id === chapter.id);
-            const firstRouteIndex = route.findIndex((item) => item.chapter.id === chapter.id);
-            return (
-              <button className="overview-chapter" type="button" key={chapter.id} disabled={firstRouteIndex < 0} onClick={() => onStart(firstRouteIndex)}>
-                <span className="overview-chapter-number">{String(index + 1).padStart(2, "0")}</span>
-                <span className="overview-chapter-copy">
-                  <span className="overview-chapter-meta">
-                    {chapter.fileIds.length} files · {artifactChapter?.attention.level.replace("_", " ").toLowerCase() ?? "standard"}
-                  </span>
-                  <strong>{chapter.title}</strong>
-                  <p>{chapter.summary}</p>
-                </span>
-                <ArrowRight size={15} />
-              </button>
-            );
-          })}
-        </div>
-        {plan.stats.noiseFiles ? (
-          <p className="overview-appendix">Primer set aside {plan.stats.noiseFiles} generated or low-signal files to keep the guided path focused.</p>
-        ) : null}
-      </section>
-    </div>
-  );
-}
 
 function LiveReview({ context, panelView }: {
   context: GitHubPageContext;
@@ -563,8 +486,6 @@ function LiveReview({ context, panelView }: {
   const [error, setError] = useState<string>();
   const [resolvedHeadSha, setResolvedHeadSha] = useState<string>();
   const [headResolutionError, setHeadResolutionError] = useState<string>();
-  const [reviewScreen, setReviewScreen] = useState<"overview" | "steps">("overview");
-  const [entryRouteIndex, setEntryRouteIndex] = useState(0);
   const headSha = context.headSha
     ?? context.activeAnchor?.headSha
     ?? resolvedHeadSha;
@@ -595,8 +516,6 @@ function LiveReview({ context, panelView }: {
     setPhase("idle");
     setGeneratedChapters([]);
     setError(undefined);
-    setReviewScreen("overview");
-    setEntryRouteIndex(0);
   }, [reviewIdentity]);
 
   useEffect(() => () => sourceRef.current?.close(), []);
@@ -694,13 +613,26 @@ function LiveReview({ context, panelView }: {
     void startReview();
   }, [context.owner, context.pullNumber, context.repository, headSha, reviewIdentity, startReview]);
 
-  const plan = useMemo(() => session?.artifact
-    ? storyArtifactToReviewPlan(
+  const [authorContext, setAuthorContext] = useState<PrimerContextParseResult>();
+  useEffect(() => {
+    let cancelled = false;
+    setAuthorContext(undefined);
+    if (!context.owner || !context.repository || !context.pullNumber) return () => { cancelled = true; };
+    void client.getPullContext(context.owner, context.repository, context.pullNumber)
+      .then((result) => { if (!cancelled) setAuthorContext(result); })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [client, context.owner, context.pullNumber, context.repository]);
+
+  const plan = useMemo(() => {
+    if (!session?.artifact) return undefined;
+    const base = storyArtifactToReviewPlan(
       session.artifact,
       `${context.owner}/${context.repository}`,
       session.completedChapterIds,
-    )
-    : undefined, [context.owner, context.repository, session?.artifact, session?.completedChapterIds]);
+    );
+    return authorContext?.status === "ok" ? applyAuthorRiskAreas(base, authorContext.context) : base;
+  }, [authorContext, context.owner, context.repository, session?.artifact, session?.completedChapterIds]);
   const route = useMemo(() => plan ? getExtensionReviewRoute(plan) : [], [plan]);
   const statuses = useMemo<Record<string, ReviewStepStatus>>(
     () => Object.fromEntries(route.map(({ step }) => [step.fileId, step.status])),
@@ -712,21 +644,6 @@ function LiveReview({ context, panelView }: {
   const generationProgress = {
     completed: generationChapters.filter(({ id }) => generatedChapterIds.has(id)).length,
     total: generationChapters.length,
-  };
-
-  const enterGuidedReview = async (routeIndex: number) => {
-    const next = route[routeIndex];
-    if (!next || !session) return;
-    setEntryRouteIndex(routeIndex);
-    if (next.chapter.id !== session.currentChapterId) {
-      try {
-        setSession(await client.selectChapter(session.id, next.chapter.id));
-      } catch {
-        // The local route remains usable if progress persistence is unavailable.
-      }
-    }
-    setReviewScreen("steps");
-    void navigateGitHubToFile(next.file.path);
   };
 
   if (session?.artifact && plan) {
@@ -757,28 +674,7 @@ function LiveReview({ context, panelView }: {
         </Suspense>
       );
     }
-    if (reviewScreen === "overview") {
-      return (
-        <ReviewOverview
-          context={context}
-          session={session as HarnessSession & { artifact: NonNullable<HarnessSession["artifact"]> }}
-          plan={plan}
-          route={route}
-          onStart={(index) => void enterGuidedReview(index)}
-        />
-      );
-    }
-    return (
-      <ReviewConversation
-        context={context}
-        plan={plan}
-        session={session}
-        client={client}
-        initialSelectedIndex={entryRouteIndex}
-        onBackToOverview={() => setReviewScreen("overview")}
-        onSessionChange={setSession}
-      />
-    );
+    return <ReviewConversation context={context} plan={plan} session={session} client={client} onSessionChange={setSession} authorContext={authorContext} />;
   }
 
   const busy = phase !== "idle";
@@ -815,22 +711,33 @@ function LiveReview({ context, panelView }: {
   );
 }
 
-function ReviewConversation({
-  context,
-  plan,
-  session,
-  client,
-  initialSelectedIndex,
-  onBackToOverview,
-  onSessionChange,
-}: {
+/** One-sentence triage verdict — deterministic, from plan data only. */
+function reviewVerdict(plan: ReviewPlan, authorContext?: PrimerContextParseResult): string {
+  const deep = plan.graph.nodes.filter(({ severity }) => severity === "needs-human").length;
+  const flagged = authorContext?.status === "ok"
+    ? (authorContext.context.risk_areas ?? [])
+      .filter((area) => plan.files.some(({ path }) => path === area.path)).length
+    : 0;
+  const attention = deep === 0
+    ? "No deep-read chapters — a standard-attention review"
+    : `${deep} chapter${deep === 1 ? "" : "s"} need${deep === 1 ? "s" : ""} deep reading — budget accordingly`;
+  const asks = flagged
+    ? `; the author flags ${flagged === 1 ? "one area" : `${flagged} areas`} for your judgment, raised to “Human attention” in the route`
+    : "";
+  const stale = authorContext?.status === "ok"
+    ? unmatchedRiskAreas(plan, authorContext.context)
+    : [];
+  const staleNote = stale.length ? ` Flagged paths not in this diff (possibly stale): ${stale.join(", ")}.` : "";
+  return `${attention}${asks}.${staleNote}`;
+}
+
+function ReviewConversation({ context, plan, session, client, onSessionChange, authorContext }: {
   context: GitHubPageContext;
   plan: ReviewPlan;
   session: HarnessSession;
   client: HarnessClient;
-  initialSelectedIndex: number;
-  onBackToOverview: () => void;
   onSessionChange: (session: HarnessSession) => void;
+  authorContext?: PrimerContextParseResult | undefined;
 }) {
   const activeFileName = context.activeFile?.split("/").at(-1);
   const anchor = context.activeAnchor;
@@ -841,7 +748,6 @@ function ReviewConversation({
     : undefined;
   const route = useMemo(() => getExtensionReviewRoute(plan), [plan]);
   const [selectedIndex, setSelectedIndex] = useState(() => {
-    if (route[initialSelectedIndex]) return initialSelectedIndex;
     const currentChapterIndex = route.findIndex(({ chapter }) => chapter.id === session.currentChapterId);
     return currentChapterIndex >= 0 ? currentChapterIndex : -1;
   });
@@ -860,6 +766,7 @@ function ReviewConversation({
     action?: { label: string; url: string };
   }>();
   const [appAccess, setAppAccess] = useState<{ installed: boolean; installUrl?: string }>();
+  const [expandedChapterId, setExpandedChapterId] = useState<string>();
 
   useEffect(() => {
     let cancelled = false;
@@ -1110,22 +1017,124 @@ function ReviewConversation({
         }}
       >
         <div className="opening-space" aria-hidden="true" />
+        {authorContext?.status === "invalid" ? (
+          <p className="author-context-note author-context-invalid">
+            This PR carries a primer-context block Primer could not read ({authorContext.reason}).
+          </p>
+        ) : null}
         {!selected ? (
           <article className="agent-turn">
             <div className="trace" aria-hidden="true"><span /></div>
             <div className="agent-copy">
-              <p className="agent-name"><Sparkles size={13} /> Primer</p>
-              <h1>I’m ready to guide this review.</h1>
-              <p>
-                I found <strong>{context.owner}/{context.repository}#{context.pullNumber}</strong>.
-                {plan
-                  ? ` I loaded ${route.length} evidence-backed steps across ${plan.chapters.length} chapters and will follow the diff as you scroll.`
-                  : " I’ll follow the diff as you scroll and keep the review tied to the visible code."}
+              {authorContext?.status === "ok" ? (
+                <>
+                  <p className="utility-label">
+                    Author’s claim · {{
+                      agent: "agent-authored",
+                      human: "human-authored",
+                      mixed: "mixed authorship",
+                      inferred: "inferred by Primer",
+                    }[authorContext.context.provenance ?? "human"]} · unverified
+                  </p>
+                  <h1 className="author-claim">{authorContext.context.intent}</h1>
+                  <p className="agent-name"><Sparkles size={13} /> Primer</p>
+                </>
+              ) : (
+                <>
+                  <p className="agent-name"><Sparkles size={13} /> Primer</p>
+                  <h1>I’m ready to guide this review.</h1>
+                </>
+              )}
+              <p>{reviewVerdict(plan, authorContext)}</p>
+              <p className="brief-stats">
+                {plan.stats.totalFiles} files · {plan.stats.chapters} chapters · {plan.stats.noiseFiles} filed as low-signal
               </p>
+              <p className="utility-label brief-start-label">Start where it matters</p>
+              <ol className="brief-route">
+                {plan.chapters.map((chapter) => {
+                  const index = findChapterEntryRouteIndex(route, chapter);
+                  const expanded = expandedChapterId === chapter.id;
+                  const severity = plan.graph.nodes.find(({ chapterId }) => chapterId === chapter.id)?.severity;
+                  const asks = authorContext?.status === "ok"
+                    ? (authorContext.context.risk_areas ?? []).filter((area) =>
+                      plan.files.some((file) => file.path === area.path && file.chapterId === chapter.id))
+                    : [];
+                  return (
+                    <li key={chapter.id} className={expanded ? "is-expanded" : ""}>
+                      <button
+                        className="brief-route-step"
+                        type="button"
+                        aria-expanded={expanded}
+                        onClick={() => setExpandedChapterId(expanded ? undefined : chapter.id)}
+                      >
+                        <span className="brief-route-title">
+                          {chapter.title}
+                          <small>
+                            {chapter.fileIds.length} files
+                            {chapter.additions !== undefined || chapter.deletions !== undefined ? (
+                              <>
+                                {" · "}
+                                <span className="brief-route-added">+{chapter.additions ?? 0}</span>
+                                {" "}
+                                <span className="brief-route-deleted">−{chapter.deletions ?? 0}</span>
+                              </>
+                            ) : null}
+                            {severity === "needs-human" ? " · deep read" : ""}
+                          </small>
+                          {asks.length ? <i className="brief-route-flag" aria-label="Author-flagged" /> : null}
+                          <ChevronDown size={13} className="brief-route-chevron" />
+                        </span>
+                        {!expanded ? <span className="brief-route-summary">{chapter.summary}</span> : null}
+                        {asks.map((ask) => (
+                          <span className="brief-route-ask" key={ask.path}>
+                            author asks: {ask.note ?? ask.path.split("/").at(-1)}
+                          </span>
+                        ))}
+                      </button>
+                      {expanded ? (
+                        <div className="brief-route-detail">
+                          <p>{chapter.summary}</p>
+                          <p className="brief-route-entry">Entry point: <code>{chapter.entryPoint}</code></p>
+                          {index >= 0 ? (
+                            <button className="brief-route-open" type="button" onClick={() => void navigateTo(index)}>
+                              Open this chapter <ArrowRight size={12} />
+                            </button>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </li>
+                  );
+                })}
+              </ol>
+              {authorContext?.status === "ok" && authorContext.context.verification?.untested?.length ? (
+                <p className="brief-untested">
+                  ⚠ Author reports untested: {authorContext.context.verification.untested.join(", ")}.
+                </p>
+              ) : null}
+              {authorContext?.status === "ok" && authorContext.context.decisions?.length ? (
+                <details className="brief-decisions">
+                  <summary>Author’s decisions ({authorContext.context.decisions.length})</summary>
+                  <ul>
+                    {authorContext.context.decisions.map((decision, index) => (
+                      <li key={index}>
+                        <strong>{decision.choice}</strong>
+                        {decision.rejected ? <> — over {decision.rejected}</> : null}
+                        {decision.why ? <><br /><small>{decision.why}</small></> : null}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              ) : null}
+              {route.length ? (
+                <button className="begin-review" type="button" onClick={() => void navigateTo(0)}>
+                  Begin review <ArrowRight size={14} />
+                </button>
+              ) : null}
             </div>
           </article>
         ) : null}
 
+        {selected ? (
         <section className={`context-card ${context.activeFile ? "is-live" : ""}`}>
           <div className="context-card-heading">
             <span><FileCode2 size={14} /> Live GitHub context</span>
@@ -1150,24 +1159,8 @@ function ReviewConversation({
             <p>Open the Files changed tab or scroll to a diff and I’ll follow the active file.</p>
           )}
         </section>
-
-        {!selected ? (
-          <section className="pr-analysis-card" aria-label="Pull request analysis">
-            <div className="pr-analysis-heading"><GitPullRequest size={14} /><span>PR context &amp; analysis</span></div>
-            <strong>{plan.title}</strong>
-            <div className="pr-analysis-stats">
-              <span><b>{plan.stats.totalFiles}</b> files</span>
-              <span><b>{plan.stats.chapters}</b> chapters</span>
-              <span><b>{plan.stats.noiseFiles}</b> low signal</span>
-            </div>
-            <p>This overview applies to the whole pull request. Step conversations open on their own page, scoped to a single review step.</p>
-            {route.length ? (
-              <button className="begin-review" type="button" onClick={() => void navigateTo(0)}>
-                Begin chapter 1 <ArrowRight size={14} />
-              </button>
-            ) : null}
-          </section>
         ) : null}
+
 
         {selected ? (
           <section className="review-step-card">
@@ -1178,7 +1171,7 @@ function ReviewConversation({
                 onClick={() => {
                   setComposerValue("");
                   setDraftFeedback(undefined);
-                  onBackToOverview();
+                  setSelectedIndex(-1);
                 }}
               >
                 <ArrowLeft size={13} /> Overview
@@ -1186,28 +1179,21 @@ function ReviewConversation({
               <span>Chapter {chapterNumber} · Step {selectedIndex + 1}/{route.length}</span>
               <span className={`step-status status-${selectedStatus}`}><i /> {selectedStatus}</span>
             </div>
-            <h1>{selected.file.path.split("/").at(-1)}</h1>
-            <code className="focus-file-path">{selected.file.path}</code>
-            <p className="focus-step-summary">{selected.step.reason}</p>
-            <div className={`focus-live-context ${context.activeFile === selected.file.path ? "is-aligned" : ""}`}>
-              <FileCode2 size={13} />
-              <span>{context.activeFile === selected.file.path
-                ? "GitHub is aligned to this file"
-                : context.activeFile
-                  ? `GitHub is currently on ${activeFileName}`
-                  : "Waiting for the GitHub diff"}</span>
-              {anchor?.path === selected.file.path ? <code>{anchorLabel}</code> : null}
+            <strong>{selected.file.path.split("/").at(-1)}</strong>
+            <p>{selected.step.reason}</p>
+            <div className="evidence-list">
+              {selected.step.evidence.slice(0, 3).map((evidence, index) => (
+                <div className="evidence-row" key={`${evidence.kind}-${index}`}>
+                  <span>{evidence.kind.replace("-", " ")}</span>
+                  <p>{evidence.description}</p>
+                </div>
+              ))}
             </div>
-            {selected.step.evidence.length ? (
-              <div className="focus-evidence">
-                <span className="focus-section-label">What to verify</span>
-                {selected.step.evidence.slice(0, 2).map((evidence, index) => (
-                  <div className="focus-evidence-row" key={`${evidence.kind}-${index}`}>
-                    <i />
-                    <p>{evidence.description}</p>
-                  </div>
-                ))}
-              </div>
+            <p>This overview applies to the whole pull request. Step conversations open on their own page, scoped to a single review step.</p>
+            {route.length ? (
+              <button className="begin-review" type="button" onClick={() => void navigateTo(0)}>
+                Begin chapter 1 <ArrowRight size={14} />
+              </button>
             ) : null}
           </section>
         ) : null}
